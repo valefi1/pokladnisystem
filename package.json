@@ -1,0 +1,23 @@
+{
+  "name": "nezavisla-web-pos-mvp",
+  "private": true,
+  "version": "0.12.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "tesseract.js": "^5.1.1",
+    "pdfjs-dist": "^4.10.38",
+    "@supabase/supabase-js": "^2.49.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "vite": "^5.4.10"
+  }
+}
