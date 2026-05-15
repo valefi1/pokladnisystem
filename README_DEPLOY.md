@@ -57,3 +57,19 @@ Verze 1.8 přidává denní práci s hotovostí:
 7. Výsledkem je rozdíl: 0 Kč = sedí, záporná částka = manko, kladná částka = přebytek.
 
 Supabase tabulka pro tyto směny je `pos_cash_sessions`. Pokud už máš spuštěné starší schéma, spusť znovu `supabase/schema.sql`, nebo ručně doplň část s `pos_cash_sessions`.
+
+## Hotovost po nominálech
+
+Od verze 1.9 se pokladna otevírá a zavírá přes přepočet hotovosti po nominálech:
+
+- bankovky: 5 000, 2 000, 1 000, 500, 200, 100 Kč,
+- mince: 50, 20, 10, 5, 2, 1 Kč.
+
+Při otevření systém spočítá celkovou hotovost podle zadaných kusů a porovná ji s posledním zavřením pokladny. Při zavření spočítá fyzickou hotovost podle zadaných kusů a porovná ji s očekávanou hotovostí:
+
+```text
+očekávaná hotovost = počáteční hotovost + hotovostní prodeje + hotovostní části rozdělených plateb
+rozdíl = fyzicky spočítaná hotovost - očekávaná hotovost
+```
+
+Když už máš spuštěné Supabase schéma ze starší verze, znovu spusť `supabase/schema.sql`. Skript obsahuje `alter table ... add column if not exists`, takže doplní nové sloupce pro rozpis bankovek/mincí bez mazání stávajících dat.

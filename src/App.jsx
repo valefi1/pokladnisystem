@@ -46,6 +46,7 @@ function PosApp() {
                 categories={derived.categories}
                 nextDocumentSequence={state.sales.length + 1}
                 activeCashSession={derived.activeCashSession}
+                cashSessions={state.cashSessions}
                 onOpenCashRegister={openCashRegister}
                 onCompleteSale={completeSale}
               />

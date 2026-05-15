@@ -482,6 +482,10 @@ function reducer(state, action) {
         openedAt,
         openedBy: String(action.payload.openedBy || '').trim(),
         openingCash: Number(action.payload.openingCash) || 0,
+        openingCashBreakdown: action.payload.openingCashBreakdown || {},
+        expectedOpeningCash: action.payload.expectedOpeningCash == null ? null : Number(action.payload.expectedOpeningCash) || 0,
+        openingDifference: action.payload.openingDifference == null ? null : Number(action.payload.openingDifference) || 0,
+        previousCashSessionId: String(action.payload.previousCashSessionId || ''),
         openingNote: String(action.payload.openingNote || '').trim(),
         status: 'open',
       };
@@ -501,6 +505,7 @@ function reducer(state, action) {
         closedAt: new Date().toISOString(),
         closedBy: String(action.payload.closedBy || '').trim(),
         countedCash,
+        closingCashBreakdown: action.payload.closingCashBreakdown || {},
         expectedCash: summary.expectedCash,
         cashDifference: countedCash - summary.expectedCash,
         totalCashSales: summary.totalCashSales,

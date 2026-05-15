@@ -1,72 +1,7 @@
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-build/
-.vite/
-
-# Local env files
+node_modules
+dist
 .env
 .env.local
 .env.*.local
-!.env.example
-
-# Supabase local files
-.supabase/
-supabase/.branches/
-supabase/.temp/
-supabase/.env
-supabase/.env.local
-!supabase/schema.sql
-
-# Vercel
-.vercel/
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-*.log
-
-# OS files
 .DS_Store
-Thumbs.db
-
-# Editor / IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Testing / coverage
-coverage/
-.nyc_output/
-
-# Cache
-.cache/
-.parcel-cache/
-.eslintcache
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Local database / exports / backups
-*.sqlite
-*.sqlite3
-*.db
-*.backup
-*.bak
-
-# Generated archives
-*.zip
-*.tar
-*.tar.gz
-*.rar
-
-# Optional local data/import files
-imports/
-exports/
+.vscode

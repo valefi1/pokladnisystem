@@ -3,6 +3,7 @@ import { PaymentDialog } from '../components/PaymentDialog';
 import { formatCurrency, formatQuantity } from '../lib/format';
 import { formatUnitLabel, getDefaultSaleQuantity, getQuantityStep, isWeightUnit, normalizeCartQuantity } from '../lib/productUnits';
 import { printSaleDocument } from '../lib/receiptPrint';
+import { CashCountForm, getCashBreakdownTotal, normalizeCashBreakdown } from '../components/CashCountForm';
 import { getCategoryMeta, getProductMeta, sortCategories, sortProductsForCatalog } from '../lib/catalogPresentation';
 
 function buildDocumentNumber(sequence, createdAt) {
@@ -23,12 +24,12 @@ function createCartItem(product) {
   };
 }
 
-export function CashierPage({ products, categories, nextDocumentSequence, activeCashSession, onOpenCashRegister, onCompleteSale }) {
+export function CashierPage({ products, categories, nextDocumentSequence, activeCashSession, cashSessions = [], onOpenCashRegister, onCompleteSale }) {
   const [selectedCategory, setSelectedCategory] = useState('Vše');
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState([]);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [openingCash, setOpeningCash] = useState('');
+  const [openingBreakdown, setOpeningBreakdown] = useState({});
   const [openedBy, setOpenedBy] = useState('');
   const [openingNote, setOpeningNote] = useState('');
 
@@ -57,6 +58,16 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
       })
     );
   }, [filteredProducts]);
+
+
+  const lastClosedCashSession = useMemo(() => {
+    return [...cashSessions]
+      .filter((session) => session.closedAt)
+      .sort((a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime())[0] || null;
+  }, [cashSessions]);
+  const openingCash = getCashBreakdownTotal(openingBreakdown);
+  const previousClosingCash = lastClosedCashSession ? Number(lastClosedCashSession.countedCash ?? lastClosedCashSession.expectedCash ?? 0) || 0 : 0;
+  const openingDifference = lastClosedCashSession ? openingCash - previousClosingCash : 0;
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -130,11 +141,15 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
     if (!onOpenCashRegister) return;
     onOpenCashRegister({
       businessDate: new Date().toISOString().slice(0, 10),
-      openingCash: Number(openingCash) || 0,
+      openingCash,
+      openingCashBreakdown: normalizeCashBreakdown(openingBreakdown),
+      expectedOpeningCash: lastClosedCashSession ? previousClosingCash : null,
+      openingDifference: lastClosedCashSession ? openingDifference : null,
+      previousCashSessionId: lastClosedCashSession?.id || '',
       openedBy,
       openingNote,
     });
-    setOpeningCash('');
+    setOpeningBreakdown({});
     setOpenedBy('');
     setOpeningNote('');
   };
@@ -150,19 +165,28 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
         </section>
         <section className="card soft-card stack compact">
           <h2>Otevření pokladny</h2>
-          <p className="muted">Spočítej hotovost v kase před prvním prodejem. Při zavření se k ní přičtou hotovostní prodeje a systém spočítá manko nebo přebytek.</p>
+          <p className="muted">Spočítej hotovost v kase před prvním prodejem. Zadej počet jednotlivých bankovek a mincí; systém spočítá celkem a porovná stav s posledním zavřením.</p>
+          {lastClosedCashSession ? (
+            <div className="inner-card">
+              <div className="list-row"><span>Hotovost při posledním zavření</span><strong>{formatCurrency(previousClosingCash)}</strong></div>
+              <div className="list-row">
+                <span>Rozdíl proti dnešnímu přepočtu</span>
+                <strong style={{color: openingDifference === 0 ? 'var(--color-text)' : openingDifference < 0 ? 'var(--color-text-danger)' : 'var(--color-text-warning)'}}>
+                  {formatCurrency(openingDifference)} {openingDifference < 0 ? '· manko' : openingDifference > 0 ? '· přebytek' : '· sedí'}
+                </strong>
+              </div>
+            </div>
+          ) : <p className="muted">Zatím není uložené žádné předchozí zavření. První otevření nebude s čím porovnat.</p>}
+          <CashCountForm title="Počáteční hotovost v kase" value={openingBreakdown} onChange={setOpeningBreakdown} />
           <div className="form-grid">
-            <label>Počáteční hotovost
-              <input type="number" step="0.5" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} autoFocus placeholder="např. 2000" />
-            </label>
             <label>Otevřel/a
               <input value={openedBy} onChange={(e) => setOpenedBy(e.target.value)} placeholder="jméno obsluhy" />
             </label>
             <label>Poznámka
-              <input value={openingNote} onChange={(e) => setOpeningNote(e.target.value)} placeholder="volitelné" />
+              <input value={openingNote} onChange={(e) => setOpeningNote(e.target.value)} placeholder="např. důvod rozdílu" />
             </label>
           </div>
-          <button className="primary-button" onClick={handleOpenCashRegister}>Otevřít pokladnu</button>
+          <button className="primary-button" onClick={handleOpenCashRegister}>Otevřít pokladnu s {formatCurrency(openingCash)}</button>
         </section>
       </div>
     );

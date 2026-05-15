@@ -112,7 +112,12 @@ create table if not exists public.pos_cash_sessions (
   opened_at timestamptz not null default now(),
   closed_at timestamptz,
   opening_cash numeric not null default 0,
+  opening_cash_breakdown jsonb not null default '{}'::jsonb,
+  expected_opening_cash numeric,
+  opening_difference numeric,
+  previous_cash_session_id text,
   counted_cash numeric,
+  closing_cash_breakdown jsonb not null default '{}'::jsonb,
   expected_cash numeric,
   cash_difference numeric,
   status text not null default 'open',
@@ -120,6 +125,13 @@ create table if not exists public.pos_cash_sessions (
   updated_at timestamptz not null default now(),
   primary key (owner_id, id)
 );
+
+
+alter table public.pos_cash_sessions add column if not exists opening_cash_breakdown jsonb not null default '{}'::jsonb;
+alter table public.pos_cash_sessions add column if not exists expected_opening_cash numeric;
+alter table public.pos_cash_sessions add column if not exists opening_difference numeric;
+alter table public.pos_cash_sessions add column if not exists previous_cash_session_id text;
+alter table public.pos_cash_sessions add column if not exists closing_cash_breakdown jsonb not null default '{}'::jsonb;
 
 create unique index if not exists pos_cash_sessions_one_open_idx
   on public.pos_cash_sessions(owner_id)

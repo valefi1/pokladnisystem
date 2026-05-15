@@ -545,3 +545,45 @@ a { color: inherit; text-decoration: none; }
 .compact-message {
   padding: 10px 12px;
 }
+
+.cash-count-card {
+  overflow: hidden;
+}
+
+.cash-count-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.cash-count-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) 86px minmax(88px, auto);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+
+.cash-count-row input {
+  text-align: right;
+}
+
+.cash-count-denomination {
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .cash-count-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cash-count-row {
+    grid-template-columns: minmax(64px, 1fr) 74px minmax(82px, auto);
+  }
+}
+
+.wide-modal {
+  width: min(980px, calc(100vw - 24px));
+  max-width: 980px;
+}

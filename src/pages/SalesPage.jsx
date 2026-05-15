@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { formatCurrency, formatDateTime } from '../lib/format';
 import { paymentMethodLabel, printSaleDocument } from '../lib/receiptPrint';
+import { CashCountForm, getCashBreakdownTotal, normalizeCashBreakdown } from '../components/CashCountForm';
 
 const PERIODS = [
   { id: 'today',   label: 'Dnes' },
@@ -44,13 +45,33 @@ function groupByMonth(sales) {
   return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
 }
 
-function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashRegister, onCloseCashRegister }) {
-  const [openingCash, setOpeningCash] = useState('');
+function getLastClosedCashSession(cashSessions = [], activeCashSession) {
+  return [...cashSessions]
+    .filter((session) => session.closedAt && session.id !== activeCashSession?.id)
+    .sort((a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime())[0] || null;
+}
+
+function DifferenceLabel({ amount }) {
+  const value = Number(amount) || 0;
+  return (
+    <strong style={{color: value === 0 ? 'var(--color-text)' : value < 0 ? 'var(--color-text-danger)' : 'var(--color-text-warning)'}}>
+      {formatCurrency(value)} {value < 0 ? '· manko' : value > 0 ? '· přebytek' : '· sedí'}
+    </strong>
+  );
+}
+
+function ZReport({ sales, cashSessions = [], activeCashSession, activeSummary, onClose, onOpenCashRegister, onCloseCashRegister }) {
+  const [openingBreakdown, setOpeningBreakdown] = useState({});
   const [openingNote, setOpeningNote] = useState('');
   const [openedBy, setOpenedBy] = useState('');
-  const [countedCash, setCountedCash] = useState('');
+  const [closingBreakdown, setClosingBreakdown] = useState({});
   const [closingNote, setClosingNote] = useState('');
   const [closedBy, setClosedBy] = useState('');
+
+  const lastClosedSession = getLastClosedCashSession(cashSessions, activeCashSession);
+  const openingCash = getCashBreakdownTotal(openingBreakdown);
+  const previousClosingCash = lastClosedSession ? Number(lastClosedSession.countedCash ?? lastClosedSession.expectedCash ?? 0) || 0 : 0;
+  const openingDifference = lastClosedSession ? openingCash - previousClosingCash : 0;
 
   const sessionSales = activeSummary?.sales || [];
   const revenue = sessionSales.filter(s => !s.unpaid).reduce((sum, s) => sum + (Number(s.total) || 0), 0);
@@ -62,14 +83,18 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
   }
   const tips = sessionSales.reduce((sum, s) => sum + (s.tipAmount || 0), 0);
   const expectedCash = Number(activeSummary?.expectedCash) || 0;
-  const counted = Number(countedCash) || 0;
+  const counted = getCashBreakdownTotal(closingBreakdown);
   const difference = counted - expectedCash;
 
   const handleOpen = () => {
     if (!onOpenCashRegister) return;
     onOpenCashRegister({
       businessDate: new Date().toISOString().slice(0, 10),
-      openingCash: Number(openingCash) || 0,
+      openingCash,
+      openingCashBreakdown: normalizeCashBreakdown(openingBreakdown),
+      expectedOpeningCash: lastClosedSession ? previousClosingCash : null,
+      openingDifference: lastClosedSession ? openingDifference : null,
+      previousCashSessionId: lastClosedSession?.id || '',
       openingNote,
       openedBy,
     });
@@ -78,32 +103,49 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
 
   const handleCloseRegister = () => {
     if (!onCloseCashRegister) return;
-    onCloseCashRegister({ countedCash: counted, closingNote, closedBy });
+    onCloseCashRegister({
+      countedCash: counted,
+      closingCashBreakdown: normalizeCashBreakdown(closingBreakdown),
+      closingNote,
+      closedBy,
+    });
     onClose();
   };
 
   if (!activeCashSession) {
     return (
       <div className="modal-backdrop">
-        <div className="modal">
+        <div className="modal wide-modal">
           <div className="modal-header">
             <h3>Otevření pokladny</h3>
             <button className="ghost-button" onClick={onClose}>✕</button>
           </div>
           <div className="stack compact">
-            <p className="muted">Na začátku prodejního dne spočítej fyzickou hotovost v kase. Tato částka bude výchozí stav pro večerní kontrolu manka/přebytku.</p>
+            <p className="muted">Na začátku prodejního dne zadej počet jednotlivých bankovek a mincí. Systém z nich spočítá počáteční hotovost a porovná ji s posledním zavřením kasy.</p>
+            {lastClosedSession ? (
+              <div className="inner-card">
+                <div className="list-row"><span>Poslední zavření</span><strong>{formatDateTime(lastClosedSession.closedAt)}</strong></div>
+                <div className="list-row"><span>Hotovost při posledním zavření</span><strong>{formatCurrency(previousClosingCash)}</strong></div>
+                <div className="list-row"><span>Rozdíl proti dnešnímu přepočtu</span><DifferenceLabel amount={openingDifference} /></div>
+              </div>
+            ) : (
+              <div className="inner-card"><p className="muted">Zatím není uložené žádné předchozí zavření. První otevření nebude s čím porovnat.</p></div>
+            )}
+            <CashCountForm
+              title="Počáteční hotovost v kase"
+              note="Zadej kusy jednotlivých nominálů. Celková částka se vypočítá automaticky."
+              value={openingBreakdown}
+              onChange={setOpeningBreakdown}
+            />
             <div className="form-grid">
-              <label>Počáteční hotovost v kase
-                <input type="number" step="0.5" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} autoFocus placeholder="např. 2000" />
-              </label>
               <label>Otevřel/a
                 <input value={openedBy} onChange={(e) => setOpenedBy(e.target.value)} placeholder="jméno obsluhy" />
               </label>
               <label>Poznámka k otevření
-                <input value={openingNote} onChange={(e) => setOpeningNote(e.target.value)} placeholder="volitelné" />
+                <input value={openingNote} onChange={(e) => setOpeningNote(e.target.value)} placeholder="např. důvod rozdílu" />
               </label>
             </div>
-            <button className="primary-button full-width" onClick={handleOpen}>Otevřít pokladnu</button>
+            <button className="primary-button full-width" onClick={handleOpen}>Otevřít pokladnu s {formatCurrency(openingCash)}</button>
             <button className="ghost-button full-width" onClick={onClose}>Zavřít</button>
           </div>
         </div>
@@ -113,7 +155,7 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
 
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal wide-modal">
         <div className="modal-header">
           <div>
             <h3>Zavření pokladny / Z-report</h3>
@@ -124,6 +166,7 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
         <div className="stack compact">
           <div className="inner-card">
             <div className="list-row"><span>Počáteční hotovost</span><strong>{formatCurrency(activeCashSession.openingCash || 0)}</strong></div>
+            {activeCashSession.expectedOpeningCash != null && <div className="list-row"><span>Rozdíl při otevření proti předchozímu zavření</span><DifferenceLabel amount={activeCashSession.openingDifference || 0} /></div>}
             <div className="list-row"><span>Hotovostní prodeje</span><strong>{formatCurrency(activeSummary?.totalCashSales || 0)}</strong></div>
             <div className="list-row"><span>Očekávaná hotovost v kase</span><strong>{formatCurrency(expectedCash)}</strong></div>
           </div>
@@ -143,10 +186,13 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
               </div>
             ))}
           </div>
+          <CashCountForm
+            title="Hotovost fyzicky v kase při zavření"
+            note="Zadej kusy bankovek a mincí po přepočtu kasy."
+            value={closingBreakdown}
+            onChange={setClosingBreakdown}
+          />
           <div className="form-grid">
-            <label>Hotovost fyzicky v kase při zavření
-              <input type="number" step="0.5" value={countedCash} onChange={(e) => setCountedCash(e.target.value)} placeholder={formatCurrency(expectedCash)} autoFocus />
-            </label>
             <label>Zavřel/a
               <input value={closedBy} onChange={(e) => setClosedBy(e.target.value)} placeholder="jméno obsluhy" />
             </label>
@@ -155,12 +201,9 @@ function ZReport({ sales, activeCashSession, activeSummary, onClose, onOpenCashR
             </label>
           </div>
           <div className="inner-card">
-            <div className="list-row">
-              <span>Rozdíl po přepočtu</span>
-              <strong style={{color: difference === 0 ? 'var(--color-text)' : difference < 0 ? 'var(--color-text-danger)' : 'var(--color-text-warning)'}}>
-                {formatCurrency(difference)} {difference < 0 ? '· manko' : difference > 0 ? '· přebytek' : '· sedí'}
-              </strong>
-            </div>
+            <div className="list-row"><span>Spočítaná hotovost</span><strong>{formatCurrency(counted)}</strong></div>
+            <div className="list-row"><span>Očekávaná hotovost</span><strong>{formatCurrency(expectedCash)}</strong></div>
+            <div className="list-row"><span>Rozdíl po přepočtu</span><DifferenceLabel amount={difference} /></div>
           </div>
           <button className="primary-button full-width" onClick={handleCloseRegister}>Zavřít pokladnu</button>
           <button className="ghost-button full-width" onClick={() => window.print()}>Tisknout Z-report</button>
@@ -495,7 +538,7 @@ export function SalesPage({ sales = [], dayClosures = [], cashSessions = [], act
         {cashSessions.length === 0 && <p className="muted">Zatím žádná otevřená ani zavřená pokladna.</p>}
       </div>
 
-      {zReport && <ZReport sales={sales} activeCashSession={activeCashSession} activeSummary={activeCashSessionSummary} onClose={() => setZReport(false)} onOpenCashRegister={onOpenCashRegister} onCloseCashRegister={onCloseCashRegister} onCloseDay={onCloseDay} />}
+      {zReport && <ZReport sales={sales} cashSessions={cashSessions} activeCashSession={activeCashSession} activeSummary={activeCashSessionSummary} onClose={() => setZReport(false)} onOpenCashRegister={onOpenCashRegister} onCloseCashRegister={onCloseCashRegister} onCloseDay={onCloseDay} />}
     </div>
   );
 }
