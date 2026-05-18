@@ -132,12 +132,12 @@ export function DevicesPage() {
             </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={prefs.printerAutoPrint} onChange={(e) => handleChange('printerAutoPrint', e.target.checked)} />
-              Automaticky otevírat tisk po prodeji
+Automaticky vytisknout po prodeji
             </label>
           </div>
           <div className="inner-card">
             <strong>Jak to teď funguje</strong>
-            <p className="muted">Produkční tisk jde zatím přes systémový dialog, ale všechny tiskové požadavky se zapisují do debug logu. To je dobrý základ, než doplníme případný USB bridge.</p>
+            <p className="muted">Na Androidu je automatický tisk výchozí vypnutý. Po zaplacení se zobrazí velké tlačítko pro ruční tisk poslední účtenky; systémový tisk Androidu se otevře pouze po klepnutí. Pro tichý ESC/POS tisk bez dialogu bude potřeba nativní Android bridge nebo tisková aplikace.</p>
           </div>
         </section>
 

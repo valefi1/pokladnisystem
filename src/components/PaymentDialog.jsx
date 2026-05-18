@@ -21,14 +21,19 @@ const PAYMENT_METHODS = [
   { id: 'unpaid',   label: 'Nezaplaceno', icon: '⏸' },
 ];
 
+function roundCashAmount(value) {
+  return Math.round((Number(value) || 0) + Number.EPSILON);
+}
+
 function getSuggestions(total) {
+  const roundedTotal = roundCashAmount(total);
   const result = [];
   for (const note of BANKNOTE_SUGGESTIONS) {
-    let rounded = Math.ceil(total / note) * note;
-    if (rounded >= total && !result.includes(rounded)) result.push(rounded);
+    let rounded = Math.ceil(roundedTotal / note) * note;
+    if (rounded >= roundedTotal && !result.includes(rounded)) result.push(rounded);
     if (result.length >= 4) break;
   }
-  if (!result.includes(Math.ceil(total))) result.unshift(Math.ceil(total));
+  if (!result.includes(roundedTotal)) result.unshift(roundedTotal);
   return result.slice(0, 5);
 }
 
@@ -46,7 +51,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
   const [invoiceDueDate, setInvoiceDueDate] = useState(createInvoiceDueDate());
   const [voucherLabel, setVoucherLabel] = useState('');
   const [note, setNote] = useState('');
-  const [printReceipt, setPrintReceipt] = useState(true);
+  const [printReceipt, setPrintReceipt] = useState(false);
   const [email, setEmail] = useState('');
   const [terminalStatus, setTerminalStatus] = useState('idle');
   const [terminalMessage, setTerminalMessage] = useState('');
@@ -67,14 +72,14 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
     setVoucherLabel('');
     setNote('');
     setEmail('');
-    setPrintReceipt(Boolean(prefs.printerAutoPrint));
+    setPrintReceipt(false);
     setTerminalStatus('idle');
     setTerminalMessage('');
     setTerminalResult(null);
     setSubmitting(false);
     setSplit(initSplit(total));
     setSplitStep('');
-  }, [open, prefs.printerAutoPrint, total]);
+  }, [open, total]);
 
   const tipAmount = useMemo(() => {
     if (!tip) return 0;
@@ -83,17 +88,21 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
   }, [tip, tipMode, total]);
 
   const totalWithTip = total + tipAmount;
+  const cashPayableTotal = roundCashAmount(totalWithTip);
+  const payableTotal = method === 'cash' && !split.active ? cashPayableTotal : totalWithTip;
+  const roundingAmount = method === 'cash' && !split.active ? cashPayableTotal - totalWithTip : 0;
 
   const change = useMemo(() => {
     const r = Number(cashReceived) || 0;
-    return Math.max(0, r - (split.active ? split.remaining : totalWithTip));
-  }, [cashReceived, totalWithTip, split]);
+    const due = method === 'cash' && !split.active ? cashPayableTotal : (split.active ? split.remaining : totalWithTip);
+    return Math.max(0, r - due);
+  }, [cashReceived, totalWithTip, split, method, cashPayableTotal]);
 
   const dotypayReady = method === 'card' && (prefs.terminalMode === 'dotypay-sim' || prefs.terminalMode === 'dotypay-live');
 
   const disableConfirm =
     submitting ||
-    (method === 'cash' && !split.active && (Number(cashReceived) || 0) < totalWithTip) ||
+    (method === 'cash' && !split.active && (Number(cashReceived) || 0) < payableTotal) ||
     (method === 'cash' && split.active && (Number(cashReceived) || 0) < split.remaining) ||
     (method === 'invoice' && !invoiceCustomer.trim()) ||
     (method === 'voucher' && !voucherLabel.trim());
@@ -119,6 +128,8 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
       tipAmount,
       cashReceived: 0,
       change: 0,
+      payableTotal: total + tipAmount,
+      roundingAmount: 0,
       invoiceCustomer: '',
       invoiceDueDate: '',
       voucherLabel: '',
@@ -146,6 +157,8 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           tipAmount,
           cashReceived: 0,
           change: 0,
+          payableTotal: total,
+          roundingAmount: 0,
           invoiceCustomer: '',
           invoiceDueDate: '',
           voucherLabel: '',
@@ -161,7 +174,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
       if (dotypayReady) {
         setTerminalStatus('processing');
         setTerminalMessage('Odesílám částku na Dotypay terminál…');
-        nextTerminalResult = await runDotypayPayment({ amount: totalWithTip, documentNumber: documentNumberPreview });
+        nextTerminalResult = await runDotypayPayment({ amount: payableTotal, documentNumber: documentNumberPreview });
         setTerminalResult(nextTerminalResult);
         setTerminalStatus(nextTerminalResult.status);
         setTerminalMessage(nextTerminalResult.message || 'Terminál vrátil výsledek.');
@@ -179,6 +192,8 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
         tipAmount,
         cashReceived: method === 'cash' ? Number(cashReceived) || 0 : 0,
         change: method === 'cash' ? change : 0,
+        payableTotal,
+        roundingAmount,
         invoiceCustomer,
         invoiceDueDate,
         voucherLabel,
@@ -195,7 +210,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
 
   if (!open) return null;
 
-  const currentRemaining = split.active ? split.remaining : totalWithTip;
+  const currentRemaining = method === 'cash' && !split.active ? payableTotal : (split.active ? split.remaining : totalWithTip);
   const TIP_PRESETS = [10, 15, 20];
 
   return (
@@ -205,7 +220,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           <div>
             <h3>Platba</h3>
             <p className="muted">
-              {formatCurrency(total)}{tipAmount > 0 ? ` + spropitné ${formatCurrency(tipAmount)} = ${formatCurrency(totalWithTip)}` : ''} · {documentNumberPreview}
+              {formatCurrency(total)}{tipAmount > 0 ? ` + spropitné ${formatCurrency(tipAmount)} = ${formatCurrency(totalWithTip)}` : ''}{method === 'cash' && roundingAmount !== 0 ? ` · hotově ${formatCurrency(payableTotal)}` : ''} · {documentNumberPreview}
             </p>
           </div>
           <button className="ghost-button" onClick={onClose} disabled={submitting}>✕</button>
@@ -263,7 +278,15 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           {/* ── Hotovost ── */}
           {method === 'cash' && (
             <div className="inner-card stack compact">
-              <strong>Přijatá částka</strong>
+              <div className="section-title-row">
+                <strong>Přijatá částka</strong>
+                <span className="badge accent-badge">Hotově zaokrouhleno na celé Kč</span>
+              </div>
+              <div className="cash-rounding-summary">
+                <div className="list-row"><span>Před zaokrouhlením</span><strong>{formatCurrency(totalWithTip)}</strong></div>
+                <div className="list-row"><span>Zaokrouhlení</span><strong className={roundingAmount === 0 ? '' : roundingAmount > 0 ? 'warning-text' : 'success-text'}>{formatCurrency(roundingAmount)}</strong></div>
+                <div className="list-row"><span>K úhradě hotově</span><strong>{formatCurrency(payableTotal)}</strong></div>
+              </div>
               <div className="banknote-suggestions">
                 {getSuggestions(currentRemaining).map((val) => (
                   <button key={val} type="button" className={`banknote-btn ${Number(cashReceived) === val ? 'active' : ''}`}
@@ -275,7 +298,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
               <div className="form-grid">
                 <label>
                   Zadáno zákazníkem
-                  <input type="number" min={currentRemaining} step="0.5" value={cashReceived}
+                  <input type="number" min={currentRemaining} step="1" value={cashReceived}
                     onChange={(e) => setCashReceived(e.target.value)} autoFocus />
                 </label>
                 <div className="summary-box summary-box-inline" style={{ alignSelf: 'flex-end' }}>
@@ -391,7 +414,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
             </div>
           )}
 
-          {/* ── Poznámka + e-mail + tisk ── */}
+          {/* ── Poznámka + e-mail + volitelný tisk ── */}
           <label>Poznámka k dokladu
             <textarea rows="2" value={note} onChange={(e) => setNote(e.target.value)} placeholder="volitelné" />
           </label>
@@ -399,16 +422,16 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
             <label>E-mail zákazníka (pro zaslání účtenky)
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="volitelné" />
             </label>
-            <label className="checkbox-row" style={{alignSelf:'flex-end',paddingBottom:'4px'}}>
+            <label className="checkbox-row receipt-toggle-row" style={{alignSelf:'flex-end',paddingBottom:'4px'}}>
               <input type="checkbox" checked={printReceipt} onChange={(e) => setPrintReceipt(e.target.checked)} />
-              Tisknout účtenku
+              <span>Vytisknout hned po zaplacení</span>
             </label>
           </div>
 
           <div className="form-actions">
             <button className="ghost-button" onClick={onClose} disabled={submitting}>Zpět</button>
             <button className="primary-button" onClick={handleConfirm} disabled={disableConfirm}>
-              {submitting ? 'Zpracovávám…' : method === 'unpaid' ? 'Označit nezaplaceno' : dotypayReady ? `Odeslat na terminál · ${formatCurrency(totalWithTip)}` : `Potvrdit · ${formatCurrency(totalWithTip)}`}
+              {submitting ? 'Zpracovávám…' : method === 'unpaid' ? 'Označit nezaplaceno' : dotypayReady ? `Odeslat na terminál · ${formatCurrency(payableTotal)}` : `Potvrdit · ${formatCurrency(payableTotal)}`}
             </button>
           </div>
         </div>

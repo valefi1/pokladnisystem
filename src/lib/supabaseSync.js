@@ -11,6 +11,7 @@ const SYNC_TABLES = {
   auditLog: 'pos_audit_log',
   dayClosures: 'pos_day_closures',
   cashSessions: 'pos_cash_sessions',
+  parkedTickets: 'pos_parked_tickets',
 };
 
 function nowIso() {
@@ -110,6 +111,40 @@ function cashSessionRow(userId, session) {
   };
 }
 
+
+function lineGross(item) {
+  return (Number(item.price) || 0) * (Number(item.quantity) || 0);
+}
+
+function lineDiscount(item) {
+  const gross = lineGross(item);
+  const raw = Number(item.discountValue) || 0;
+  if (raw <= 0 || gross <= 0) return 0;
+  if (item.discountType === 'percent') return Math.min(gross, gross * raw / 100);
+  return Math.min(gross, raw);
+}
+
+function parkedTicketTotal(ticket) {
+  const items = Array.isArray(ticket.items) ? ticket.items : [];
+  const subtotal = items.reduce((sum, item) => sum + Math.max(0, lineGross(item) - lineDiscount(item)), 0);
+  const raw = Number(ticket.discountValue) || 0;
+  const orderDiscount = ticket.discountMode === 'percent' ? Math.min(subtotal, subtotal * raw / 100) : Math.min(subtotal, raw);
+  return Math.max(0, subtotal - Math.max(0, orderDiscount));
+}
+
+function parkedTicketRow(userId, ticket) {
+  const items = Array.isArray(ticket.items) ? ticket.items : [];
+  const total = parkedTicketTotal(ticket);
+  const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+  return {
+    ...jsonRow(userId, ticket),
+    name: ticket.name || 'Účet',
+    total,
+    item_count: itemCount,
+    status: ticket.status || 'open',
+  };
+}
+
 function closureRow(userId, closure) {
   return {
     ...jsonRow(userId, closure),
@@ -131,6 +166,7 @@ const rowBuilders = {
   auditLog: auditRow,
   dayClosures: closureRow,
   cashSessions: cashSessionRow,
+  parkedTickets: parkedTicketRow,
 };
 
 async function getUserIdOrThrow() {
@@ -167,6 +203,25 @@ export async function loadRemoteState() {
   return normalizeState(next);
 }
 
+async function deleteMissingParkedTickets(userId, normalized) {
+  const ids = new Set((normalized.parkedTickets || []).filter((item) => item?.id).map((item) => String(item.id)));
+  const { data, error: readError } = await supabase
+    .from(SYNC_TABLES.parkedTickets)
+    .select('id')
+    .eq('owner_id', userId);
+  if (readError) throw readError;
+
+  const staleIds = (data || []).map((row) => row.id).filter((id) => !ids.has(String(id)));
+  if (staleIds.length === 0) return;
+
+  const { error } = await supabase
+    .from(SYNC_TABLES.parkedTickets)
+    .delete()
+    .eq('owner_id', userId)
+    .in('id', staleIds);
+  if (error) throw error;
+}
+
 export async function syncStateToSupabase(state) {
   if (!supabaseConfigured || !supabase) return { skipped: true };
   const userId = await getUserIdOrThrow();
@@ -179,6 +234,8 @@ export async function syncStateToSupabase(state) {
     const { error } = await supabase.from(table).upsert(rows, { onConflict: 'owner_id,id' });
     if (error) throw error;
   }
+
+  await deleteMissingParkedTickets(userId, normalized);
 
   const settingsRows = [
     { owner_id: userId, key: 'imports', payload: normalized.imports || {}, updated_at: nowIso() },

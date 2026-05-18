@@ -29,6 +29,10 @@ function PosApp() {
     openCashRegister,
     closeCashRegister,
     closeDay,
+    addParkedTicket,
+    renameParkedTicket,
+    updateParkedTicketItems,
+    deleteParkedTicket,
     resetDemo,
     syncStatus,
   } = usePosStore();
@@ -47,8 +51,13 @@ function PosApp() {
                 nextDocumentSequence={state.sales.length + 1}
                 activeCashSession={derived.activeCashSession}
                 cashSessions={state.cashSessions}
+                parkedTickets={state.parkedTickets}
                 onOpenCashRegister={openCashRegister}
                 onCompleteSale={completeSale}
+                onAddParkedTicket={addParkedTicket}
+                onRenameParkedTicket={renameParkedTicket}
+                onUpdateParkedTicketItems={updateParkedTicketItems}
+                onDeleteParkedTicket={deleteParkedTicket}
               />
             }
           />

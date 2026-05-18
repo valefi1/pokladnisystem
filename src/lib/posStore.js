@@ -88,6 +88,21 @@ function auditEntry(action, entityType, entityId, label, details = {}) {
 }
 
 
+
+function normalizeParkedTicket(ticket, fallbackName = 'Účet') {
+  const now = new Date().toISOString();
+  return {
+    id: ticket?.id || uid('ticket'),
+    name: String(ticket?.name || fallbackName).trim() || fallbackName,
+    items: Array.isArray(ticket?.items) ? ticket.items : [],
+    discountMode: ticket?.discountMode === 'percent' ? 'percent' : 'amount',
+    discountValue: Number(ticket?.discountValue) || 0,
+    createdAt: ticket?.createdAt || now,
+    updatedAt: ticket?.updatedAt || now,
+    status: ticket?.status || 'open',
+  };
+}
+
 function getOpenCashSession(state) {
   return (state.cashSessions || []).find((session) => !session.closedAt) || null;
 }
@@ -134,7 +149,12 @@ function summarizeCashSessionSales(sales, session) {
 function reducer(state, action) {
   switch (action.type) {
     case 'HYDRATE_REMOTE': {
-      return { ...state, ...action.payload };
+      const remote = action.payload || {};
+      return {
+        ...state,
+        ...remote,
+        parkedTickets: (remote.parkedTickets || []).map((ticket, index) => normalizeParkedTicket(ticket, `Účet ${index + 1}`)),
+      };
     }
     case 'ADD_PRODUCT': {
       const product = { ...action.payload, id: uid('p') };
@@ -302,22 +322,40 @@ function reducer(state, action) {
         : state;
     }
     case 'COMPLETE_SALE': {
-      const { items, paymentMethod, cashReceived, invoiceCustomer, invoiceDueDate, voucherLabel, note, terminalResult, tipAmount, email, unpaid, splitLegs } = action.payload;
+      const { items, paymentMethod, cashReceived, invoiceCustomer, invoiceDueDate, voucherLabel, note, terminalResult, tipAmount, email, unpaid, splitLegs, grossSubtotal, itemDiscountTotal, saleDiscountAmount, roundingAmount, payableTotal } = action.payload;
       const createdAt = new Date().toISOString();
       const lastToday = state.sales.filter((sale) => String(sale.documentNumber || '').startsWith(createdAt.slice(0, 10).replaceAll('-', ''))).length;
       const documentNumber = buildDocumentNumber(lastToday + 1, createdAt);
-      const preparedItems = items.map((item) => ({
-        productId: item.productId,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        unit: item.unit,
-        category: item.category || '',
-        vatRate: Number(item.vatRate) || 12,
-      }));
-      const subtotal = preparedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const preparedItems = items.map((item) => {
+        const price = Number(item.price) || 0;
+        const quantity = Number(item.quantity) || 0;
+        const lineGross = Number(item.lineGross) || price * quantity;
+        const lineDiscount = Number(item.lineDiscount) || 0;
+        return {
+          productId: item.productId,
+          name: item.name,
+          price,
+          originalPrice: Number(item.originalPrice) || price,
+          quantity,
+          unit: item.unit,
+          category: item.category || '',
+          vatRate: Number(item.vatRate) || 12,
+          discountType: item.discountType || 'amount',
+          discountValue: Number(item.discountValue) || 0,
+          lineGross,
+          lineDiscount,
+          lineTotal: Math.max(0, Number(item.lineTotal) || (lineGross - lineDiscount)),
+        };
+      });
+      const computedGrossSubtotal = preparedItems.reduce((sum, item) => sum + item.lineGross, 0);
+      const computedItemDiscount = preparedItems.reduce((sum, item) => sum + item.lineDiscount, 0);
+      const gross = Number(grossSubtotal) || computedGrossSubtotal;
+      const itemDiscount = Number(itemDiscountTotal) || computedItemDiscount;
+      const saleDiscount = Number(saleDiscountAmount) || 0;
+      const subtotal = Math.max(0, gross - itemDiscount - saleDiscount);
       const tip = Number(tipAmount) || 0;
-      const total = subtotal + tip;
+      const rounding = Number(roundingAmount) || 0;
+      const total = Number.isFinite(Number(payableTotal)) ? Number(payableTotal) : Math.max(0, subtotal + tip + rounding);
       const received = Number(cashReceived) || 0;
       const change = paymentMethod === 'cash' ? Math.max(0, received - total) : 0;
       const movementEntries = [];
@@ -358,9 +396,13 @@ function reducer(state, action) {
         documentNumber,
         createdAt,
         paymentMethod,
+        grossSubtotal: gross,
+        itemDiscountTotal: itemDiscount,
+        saleDiscountAmount: saleDiscount,
         subtotal,
         total,
         tipAmount: tip,
+        roundingAmount: rounding,
         cashReceived: paymentMethod === 'cash' ? received : 0,
         change,
         invoiceCustomer: paymentMethod === 'invoice' ? String(invoiceCustomer || '').trim() : '',
@@ -525,6 +567,49 @@ function reducer(state, action) {
       };
     }
 
+
+    case 'ADD_PARKED_TICKET': {
+      const ticket = normalizeParkedTicket(action.payload, `Účet ${(state.parkedTickets || []).length + 1}`);
+      return {
+        ...state,
+        parkedTickets: [...(state.parkedTickets || []), ticket],
+      };
+    }
+    case 'RENAME_PARKED_TICKET': {
+      const name = String(action.payload?.name || '').trim();
+      if (!name) return state;
+      return {
+        ...state,
+        parkedTickets: (state.parkedTickets || []).map((ticket) =>
+          ticket.id === action.payload.id ? { ...ticket, name, updatedAt: new Date().toISOString() } : ticket
+        ),
+      };
+    }
+    case 'UPDATE_PARKED_TICKET_ITEMS': {
+      const meta = action.payload.meta || {};
+      return {
+        ...state,
+        parkedTickets: (state.parkedTickets || []).map((ticket) =>
+          ticket.id === action.payload.id
+            ? {
+                ...ticket,
+                ...meta,
+                items: Array.isArray(action.payload.items) ? action.payload.items : [],
+                discountMode: meta.discountMode || ticket.discountMode || 'amount',
+                discountValue: meta.discountValue ?? ticket.discountValue ?? 0,
+                updatedAt: new Date().toISOString(),
+              }
+            : ticket
+        ),
+      };
+    }
+    case 'DELETE_PARKED_TICKET': {
+      return {
+        ...state,
+        parkedTickets: (state.parkedTickets || []).filter((ticket) => ticket.id !== action.payload.id),
+      };
+    }
+
     case 'CLOSE_DAY': {
       const closure = {
         id: uid('close'),
@@ -671,8 +756,26 @@ export function usePosStore() {
   }, []);
 
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (!remoteLoadedRef.current) return;
+      loadRemoteState()
+        .then((remoteState) => {
+          if (remoteState) {
+            dispatch({ type: 'HYDRATE_REMOTE', payload: remoteState });
+            setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Načteno ze Supabase.' });
+          }
+        })
+        .catch((error) => {
+          setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Supabase načtení selhalo.' });
+        });
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     saveState(state);
     const timeout = window.setTimeout(() => {
+      if (!remoteLoadedRef.current) return;
       syncStateToSupabase(state)
         .then((result) => {
           if (result?.skipped) {
@@ -791,6 +894,10 @@ export function usePosStore() {
     openCashRegister: (payload) => dispatch({ type: 'OPEN_CASH_REGISTER', payload }),
     closeCashRegister: (payload) => dispatch({ type: 'CLOSE_CASH_REGISTER', payload }),
     closeDay: (payload) => dispatch({ type: 'CLOSE_DAY', payload }),
+    addParkedTicket: (payload) => dispatch({ type: 'ADD_PARKED_TICKET', payload }),
+    renameParkedTicket: (id, name) => dispatch({ type: 'RENAME_PARKED_TICKET', payload: { id, name } }),
+    updateParkedTicketItems: (id, items, meta = {}) => dispatch({ type: 'UPDATE_PARKED_TICKET_ITEMS', payload: { id, items, meta } }),
+    deleteParkedTicket: (id) => dispatch({ type: 'DELETE_PARKED_TICKET', payload: { id } }),
     resetDemo: () => dispatch({ type: 'RESET_DEMO' }),
   };
 }

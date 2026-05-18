@@ -10,6 +10,7 @@ export const emptyState = {
   auditLog: [],
   dayClosures: [],
   cashSessions: [],
+  parkedTickets: [],
   syncQueue: [],
 };
 
@@ -26,6 +27,7 @@ export function normalizeState(partial = {}) {
     auditLog: partial.auditLog ?? emptyState.auditLog,
     dayClosures: partial.dayClosures ?? emptyState.dayClosures,
     cashSessions: partial.cashSessions ?? emptyState.cashSessions,
+    parkedTickets: partial.parkedTickets ?? emptyState.parkedTickets,
     syncQueue: partial.syncQueue ?? emptyState.syncQueue,
   };
 }

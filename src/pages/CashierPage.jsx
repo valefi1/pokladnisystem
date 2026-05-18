@@ -1,10 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PaymentDialog } from '../components/PaymentDialog';
 import { formatCurrency, formatQuantity } from '../lib/format';
-import { formatUnitLabel, getDefaultSaleQuantity, getQuantityStep, isWeightUnit, normalizeCartQuantity } from '../lib/productUnits';
+import { formatUnitLabel, getDefaultSaleQuantity, getQuantityStep, isWeightUnit, normalizeCartQuantity, sanitizePositiveQuantity } from '../lib/productUnits';
 import { printSaleDocument } from '../lib/receiptPrint';
 import { CashCountForm, getCashBreakdownTotal, normalizeCashBreakdown } from '../components/CashCountForm';
 import { getCategoryMeta, getProductMeta, sortCategories, sortProductsForCatalog } from '../lib/catalogPresentation';
+
+function createTicket(name = 'Účet 1') {
+  const now = new Date().toISOString();
+  const id = `ticket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return { id, name, items: [], discountMode: 'amount', discountValue: 0, createdAt: now, updatedAt: now, status: 'open' };
+}
 
 function buildDocumentNumber(sequence, createdAt) {
   const date = new Date(createdAt);
@@ -12,28 +18,151 @@ function buildDocumentNumber(sequence, createdAt) {
   return `${prefix}-${String(sequence).padStart(4, '0')}`;
 }
 
-function createCartItem(product) {
+function parseNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const normalized = String(value ?? '').replace(/\s/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function clampDiscount(value, max) {
+  return Math.min(Math.max(parseNumber(value), 0), Math.max(max, 0));
+}
+
+function createCartItem(product, quantity = getDefaultSaleQuantity(product.unit)) {
   return {
     productId: product.id,
     name: product.name,
     price: Number(product.price) || 0,
+    originalPrice: Number(product.price) || 0,
     unit: product.unit,
     category: product.category || '',
     vatRate: Number(product.vatRate) || 12,
-    quantity: getDefaultSaleQuantity(product.unit),
+    quantity: sanitizePositiveQuantity(quantity, product.unit),
+    discountType: 'amount',
+    discountValue: 0,
   };
 }
 
-export function CashierPage({ products, categories, nextDocumentSequence, activeCashSession, cashSessions = [], onOpenCashRegister, onCompleteSale }) {
+function getLineGross(item) {
+  return (Number(item.price) || 0) * (Number(item.quantity) || 0);
+}
+
+function getLineDiscountAmount(item) {
+  const gross = getLineGross(item);
+  const raw = Number(item.discountValue) || 0;
+  if (raw <= 0 || gross <= 0) return 0;
+  if (item.discountType === 'percent') return clampDiscount((gross * raw) / 100, gross);
+  return clampDiscount(raw, gross);
+}
+
+function getLineTotal(item) {
+  return Math.max(0, getLineGross(item) - getLineDiscountAmount(item));
+}
+
+function getItemsSubtotal(items) {
+  return items.reduce((sum, item) => sum + getLineGross(item), 0);
+}
+
+function getItemDiscountTotal(items) {
+  return items.reduce((sum, item) => sum + getLineDiscountAmount(item), 0);
+}
+
+function getTicketBaseAfterItemDiscounts(items) {
+  return Math.max(0, getItemsSubtotal(items) - getItemDiscountTotal(items));
+}
+
+function getOrderDiscountAmount(ticket, items) {
+  const base = getTicketBaseAfterItemDiscounts(items);
+  const raw = Number(ticket?.discountValue) || 0;
+  if (raw <= 0 || base <= 0) return 0;
+  if (ticket?.discountMode === 'percent') return clampDiscount((base * raw) / 100, base);
+  return clampDiscount(raw, base);
+}
+
+function getTicketTotal(ticket) {
+  const items = ticket?.items || [];
+  return Math.max(0, getTicketBaseAfterItemDiscounts(items) - getOrderDiscountAmount(ticket, items));
+}
+
+function prepareSaleItems(items) {
+  return items.map((item) => {
+    const lineGross = getLineGross(item);
+    const lineDiscount = getLineDiscountAmount(item);
+    return {
+      ...item,
+      price: Number(item.price) || 0,
+      quantity: Number(item.quantity) || 0,
+      discountType: item.discountType || 'amount',
+      discountValue: Number(item.discountValue) || 0,
+      lineGross,
+      lineDiscount,
+      lineTotal: Math.max(0, lineGross - lineDiscount),
+    };
+  });
+}
+
+export function CashierPage({ products, categories, nextDocumentSequence, activeCashSession, cashSessions = [], parkedTickets = [], onOpenCashRegister, onCompleteSale, onAddParkedTicket, onRenameParkedTicket, onUpdateParkedTicketItems, onDeleteParkedTicket }) {
   const [selectedCategory, setSelectedCategory] = useState('Vše');
   const [search, setSearch] = useState('');
-  const [cart, setCart] = useState([]);
+  const tickets = parkedTickets;
+  const [activeTicketId, setActiveTicketId] = useState(() => parkedTickets[0]?.id || '');
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [lastPrintableSale, setLastPrintableSale] = useState(null);
   const [openingBreakdown, setOpeningBreakdown] = useState({});
   const [openedBy, setOpenedBy] = useState('');
   const [openingNote, setOpeningNote] = useState('');
+  const [weightProduct, setWeightProduct] = useState(null);
+  const [weightQuantity, setWeightQuantity] = useState('');
+  const [editingItemId, setEditingItemId] = useState('');
 
-  const stockByProduct = useMemo(() => Object.fromEntries(products.map((product) => [product.id, Number(product.stock) || 0])), [products]);
+  useEffect(() => {
+    if (!tickets.length && onAddParkedTicket) {
+      const freshTicket = createTicket('Účet 1');
+      onAddParkedTicket(freshTicket);
+      setActiveTicketId(freshTicket.id);
+    }
+  }, [tickets.length, onAddParkedTicket]);
+
+  useEffect(() => {
+    if (tickets.length > 0 && !tickets.some((ticket) => ticket.id === activeTicketId)) {
+      setActiveTicketId(tickets[0].id);
+    }
+  }, [tickets, activeTicketId]);
+
+  const activeTicket = tickets.find((ticket) => ticket.id === activeTicketId) || tickets[0] || createTicket();
+  const cart = activeTicket.items || [];
+  const editingItem = cart.find((item) => item.productId === editingItemId) || null;
+
+  const updateActiveTicket = (patch) => {
+    const currentTicket = tickets.find((ticket) => ticket.id === activeTicketId) || tickets[0];
+    if (!currentTicket) return;
+    const nextTicket = { ...currentTicket, ...patch, updatedAt: new Date().toISOString() };
+    // Reuse rename/items callbacks so older store versions still work.
+    if (Object.prototype.hasOwnProperty.call(patch, 'name')) onRenameParkedTicket?.(currentTicket.id, nextTicket.name);
+    if (Object.prototype.hasOwnProperty.call(patch, 'items')) onUpdateParkedTicketItems?.(currentTicket.id, nextTicket.items);
+    if (Object.prototype.hasOwnProperty.call(patch, 'discountMode') || Object.prototype.hasOwnProperty.call(patch, 'discountValue')) {
+      onUpdateParkedTicketItems?.(currentTicket.id, currentTicket.items || [], { discountMode: nextTicket.discountMode, discountValue: nextTicket.discountValue });
+    }
+  };
+
+  const updateActiveTicketItems = (updater) => {
+    const currentTicket = tickets.find((ticket) => ticket.id === activeTicketId) || tickets[0];
+    if (!currentTicket || !onUpdateParkedTicketItems) return;
+    const currentItems = currentTicket.items || [];
+    const nextItems = typeof updater === 'function' ? updater(currentItems) : updater;
+    onUpdateParkedTicketItems(currentTicket.id, nextItems);
+  };
+
+  const updateActiveTicketDiscount = (patch) => {
+    const currentTicket = tickets.find((ticket) => ticket.id === activeTicketId) || tickets[0];
+    if (!currentTicket || !onUpdateParkedTicketItems) return;
+    onUpdateParkedTicketItems(currentTicket.id, currentTicket.items || [], {
+      discountMode: patch.discountMode ?? currentTicket.discountMode ?? 'amount',
+      discountValue: patch.discountValue ?? currentTicket.discountValue ?? 0,
+    });
+  };
+
   const orderedCategories = useMemo(() => sortCategories(categories), [categories]);
   const orderedProducts = useMemo(() => sortProductsForCatalog(products), [products]);
 
@@ -59,7 +188,6 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
     );
   }, [filteredProducts]);
 
-
   const lastClosedCashSession = useMemo(() => {
     return [...cashSessions]
       .filter((session) => session.closedAt)
@@ -69,25 +197,46 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
   const previousClosingCash = lastClosedCashSession ? Number(lastClosedCashSession.countedCash ?? lastClosedCashSession.expectedCash ?? 0) || 0 : 0;
   const openingDifference = lastClosedCashSession ? openingCash - previousClosingCash : 0;
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotalBeforeDiscounts = getItemsSubtotal(cart);
+  const itemDiscountTotal = getItemDiscountTotal(cart);
+  const ticketDiscountAmount = getOrderDiscountAmount(activeTicket, cart);
+  const total = getTicketTotal(activeTicket);
+  const totalDiscount = itemDiscountTotal + ticketDiscountAmount;
 
-  const addToCart = (product) => {
-    setCart((current) => {
+  const addProductWithQuantity = (product, quantity) => {
+    updateActiveTicketItems((current) => {
       const existing = current.find((item) => item.productId === product.id);
-      const step = getQuantityStep(product.unit);
+      const normalizedQuantity = sanitizePositiveQuantity(quantity, product.unit);
       if (existing) {
         return current.map((item) =>
           item.productId === product.id
-            ? { ...item, quantity: normalizeCartQuantity(item.quantity + step, item.unit) }
+            ? { ...item, quantity: normalizeCartQuantity((Number(item.quantity) || 0) + normalizedQuantity, item.unit) }
             : item
         );
       }
-      return [...current, createCartItem(product)];
+      return [...current, createCartItem(product, normalizedQuantity)];
     });
   };
 
+  const addToCart = (product) => {
+    if (isWeightUnit(product.unit)) {
+      setWeightProduct(product);
+      setWeightQuantity('');
+      return;
+    }
+    addProductWithQuantity(product, getDefaultSaleQuantity(product.unit));
+  };
+
+  const confirmWeightProduct = () => {
+    if (!weightProduct) return;
+    const quantity = sanitizePositiveQuantity(weightQuantity, weightProduct.unit);
+    addProductWithQuantity(weightProduct, quantity);
+    setWeightProduct(null);
+    setWeightQuantity('');
+  };
+
   const setQuantity = (productId, rawValue) => {
-    setCart((current) =>
+    updateActiveTicketItems((current) =>
       current
         .map((item) => {
           if (item.productId !== productId) return item;
@@ -97,8 +246,21 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
     );
   };
 
+  const updateCartItem = (productId, patch) => {
+    updateActiveTicketItems((current) =>
+      current
+        .map((item) => item.productId === productId ? { ...item, ...patch } : item)
+        .filter((item) => (Number(item.quantity) || 0) > 0)
+    );
+  };
+
+  const removeCartItem = (productId) => {
+    updateActiveTicketItems((current) => current.filter((item) => item.productId !== productId));
+    setEditingItemId('');
+  };
+
   const adjustQuantity = (productId, direction) => {
-    setCart((current) =>
+    updateActiveTicketItems((current) =>
       current
         .map((item) => {
           if (item.productId !== productId) return item;
@@ -109,31 +271,79 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
     );
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    updateActiveTicketItems([]);
+    updateActiveTicketDiscount({ discountValue: 0 });
+  };
+
+  const createNewTicket = () => {
+    const nextName = `Účet ${tickets.length + 1}`;
+    const name = window.prompt('Název nového účtu', nextName) || nextName;
+    const ticket = createTicket(name.trim() || nextName);
+    onAddParkedTicket?.(ticket);
+    setActiveTicketId(ticket.id);
+  };
+
+  const renameActiveTicket = () => {
+    const nextName = window.prompt('Název účtu', activeTicket.name || 'Účet');
+    if (!nextName) return;
+    onRenameParkedTicket?.(activeTicket.id, nextName.trim() || activeTicket.name);
+  };
+
+  const closeEmptyTicket = (ticketId) => {
+    const ticket = tickets.find((item) => item.id === ticketId);
+    if (!ticket || (ticket.items || []).length > 0 || tickets.length <= 1) return;
+    const nextTicket = tickets.find((item) => item.id !== ticketId);
+    onDeleteParkedTicket?.(ticketId);
+    if (activeTicketId === ticketId) setActiveTicketId(nextTicket?.id || '');
+  };
+
+  const removePaidTicket = () => {
+    const nextTickets = tickets.filter((ticket) => ticket.id !== activeTicket.id);
+    onDeleteParkedTicket?.(activeTicket.id);
+    if (nextTickets.length === 0) {
+      const freshTicket = createTicket('Účet 1');
+      onAddParkedTicket?.(freshTicket);
+      setActiveTicketId(freshTicket.id);
+      return;
+    }
+    setActiveTicketId(nextTickets[0].id);
+  };
+
+  const parkedTotal = tickets.reduce((sum, ticket) => sum + getTicketTotal(ticket), 0);
 
   const handleCompleteSale = (payment) => {
     const createdAt = new Date().toISOString();
+    const saleItems = prepareSaleItems(cart);
+    const saleDiscountAmount = ticketDiscountAmount;
     const receiptPayload = {
       createdAt,
       documentNumber: buildDocumentNumber(nextDocumentSequence || 1, createdAt),
-      items: cart,
+      items: saleItems,
+      grossSubtotal: subtotalBeforeDiscounts,
+      itemDiscountTotal,
+      saleDiscountAmount,
       subtotal: total,
-      total: total + (Number(payment.tipAmount) || 0),
+      total: Number(payment.payableTotal ?? (total + (Number(payment.tipAmount) || 0))) || 0,
       tipAmount: payment.tipAmount || 0,
+      roundingAmount: Number(payment.roundingAmount) || 0,
       paymentMethod: payment.paymentMethod,
       cashReceived: payment.paymentMethod === 'cash' ? Number(payment.cashReceived) || 0 : 0,
-      change: payment.paymentMethod === 'cash' ? Math.max(0, (Number(payment.cashReceived) || 0) - (total + (Number(payment.tipAmount) || 0))) : 0,
+      change: payment.paymentMethod === 'cash' ? Number(payment.change) || 0 : 0,
       invoiceCustomer: payment.invoiceCustomer,
       invoiceDueDate: payment.invoiceDueDate,
       voucherLabel: payment.voucherLabel,
       note: payment.note,
     };
 
-    onCompleteSale({ items: cart, ...payment });
+    onCompleteSale({ items: saleItems, grossSubtotal: subtotalBeforeDiscounts, itemDiscountTotal, saleDiscountAmount, ...payment });
+    if (!payment.unpaid) {
+      setLastPrintableSale(receiptPayload);
+    }
     if (payment.printReceipt && !payment.unpaid) {
       printSaleDocument(receiptPayload);
     }
-    setCart([]);
+    removePaidTicket();
     setPaymentOpen(false);
   };
 
@@ -171,7 +381,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               <div className="list-row"><span>Hotovost při posledním zavření</span><strong>{formatCurrency(previousClosingCash)}</strong></div>
               <div className="list-row">
                 <span>Rozdíl proti dnešnímu přepočtu</span>
-                <strong style={{color: openingDifference === 0 ? 'var(--color-text)' : openingDifference < 0 ? 'var(--color-text-danger)' : 'var(--color-text-warning)'}}>
+                <strong style={{color: openingDifference === 0 ? 'var(--text)' : openingDifference < 0 ? 'var(--danger)' : 'var(--warning)'}}>
                   {formatCurrency(openingDifference)} {openingDifference < 0 ? '· manko' : openingDifference > 0 ? '· přebytek' : '· sedí'}
                 </strong>
               </div>
@@ -194,17 +404,46 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
 
   return (
     <div className="page-stack cashier-layout">
-      <section className="page-header">
+      <section className="page-header cashier-page-header">
         <div>
           <h1>Pokladna</h1>
-          <p className="muted">Produkty jsou nově seskupené po podobných řadách a barevně rozlišené, aby šly rychleji najít. V rámci jedné řady držím podobné odstíny, ale ne úplně stejné dlaždice vedle sebe.</p>
+          <p className="muted">Kompaktní režim pro rychlé markování. Účty jsou nahoře v liště a sdílí se přes Supabase.</p>
           <p className="muted">Pokladna otevřena od {new Date(activeCashSession.openedAt).toLocaleTimeString('cs-CZ', {hour:'2-digit', minute:'2-digit'})} · počáteční hotovost {formatCurrency(activeCashSession.openingCash || 0)}</p>
         </div>
       </section>
 
-      <div className="cashier-grid">
-        <section className="card">
-          <div className="toolbar">
+      <section className="ticket-bar card compact-card sticky-ticket-bar">
+        <div className="ticket-bar-title">
+          <strong>Otevřené účty</strong>
+          <span className="badge accent-badge">{tickets.length}</span>
+        </div>
+        <div className="ticket-tabs">
+          {tickets.map((ticket) => {
+            const ticketTotal = getTicketTotal(ticket);
+            const itemCount = (ticket.items || []).reduce((sum, item) => sum + item.quantity, 0);
+            return (
+              <button
+                key={ticket.id}
+                className={`ticket-pill ${ticket.id === activeTicket.id ? 'active' : ''}`}
+                onClick={() => setActiveTicketId(ticket.id)}
+              >
+                <span>{ticket.name}</span>
+                <small>{formatCurrency(ticketTotal)} · {formatQuantity(itemCount)} pol.</small>
+              </button>
+            );
+          })}
+        </div>
+        <div className="ticket-actions">
+          <span className="muted">Celkem {formatCurrency(parkedTotal)}</span>
+          <button className="ghost-button compact-button" onClick={renameActiveTicket}>Pojmenovat</button>
+          <button className="ghost-button compact-button" onClick={() => closeEmptyTicket(activeTicket.id)} disabled={cart.length > 0 || tickets.length <= 1}>Zavřít prázdný</button>
+          <button className="primary-button compact-button touch-add-ticket" onClick={createNewTicket}>+ Nový účet</button>
+        </div>
+      </section>
+
+      <div className="cashier-grid compact-cashier-grid">
+        <section className="card product-catalog-card">
+          <div className="toolbar cashier-toolbar">
             <input
               className="search-input"
               placeholder="Hledat produkt, barkód nebo PLU"
@@ -227,22 +466,21 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               })}
             </div>
           </div>
-          <div className="product-grid">
+          <div className="product-grid dense-product-grid">
             {filteredProducts.map((product) => {
               const weighted = isWeightUnit(product.unit);
               const visual = productVisuals[product.id] || getProductMeta(product, 0);
               return (
                 <button
                   key={product.id}
-                  className={`product-tile semantic-tile ${(Number(product.stock) || 0) <= 0 ? 'warning-tile' : ''}`}
+                  className={`product-tile semantic-tile high-contrast-tile ${(Number(product.stock) || 0) <= 0 ? 'warning-tile' : ''}`}
                   style={visual.style}
                   onClick={() => addToCart(product)}
                 >
                   <span className="tile-category">{product.category}</span>
                   <strong>{product.name}</strong>
-                  <span className="tile-family">{visual.family}</span>
-                  <span>{formatCurrency(product.price)}</span>
-                  <small>{weighted ? 'na váhu · po 0,001 kg' : 'kusový prodej'}</small>
+                  <span className="tile-price">{formatCurrency(product.price)}</span>
+                  <small>{weighted ? 'na váhu · zadat kg' : 'kusový prodej'}</small>
                   <small>Sklad {formatQuantity(product.stock)} {formatUnitLabel(product.unit)}</small>
                 </button>
               );
@@ -252,23 +490,23 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
 
         <aside className="card cart-panel">
           <div className="section-title-row">
-            <h2>Účet</h2>
-            <button className="ghost-button" onClick={clearCart}>Vyčistit</button>
+            <h2>{activeTicket.name}</h2>
+            <button className="ghost-button compact-button" onClick={clearCart}>Vyčistit</button>
           </div>
           <div className="stack compact cart-items">
             {cart.length === 0 ? <p className="muted">Košík je prázdný.</p> : null}
             {cart.map((item) => {
               const weighted = isWeightUnit(item.unit);
-              const currentStock = stockByProduct[item.productId] ?? 0;
-              const projectedStock = currentStock - item.quantity;
+              const lineDiscount = getLineDiscountAmount(item);
+              const lineTotal = getLineTotal(item);
               return (
-                <div key={item.productId} className="cart-row cart-item-row">
+                <div key={item.productId} className="cart-row cart-item-row editable-cart-row" onClick={() => setEditingItemId(item.productId)} role="button" tabIndex="0">
                   <div>
                     <strong>{item.name}</strong>
                     <p className="muted">{formatCurrency(item.price)} / {formatUnitLabel(item.unit)}</p>
-                    <p className="muted">Po prodeji: {formatQuantity(projectedStock)} {formatUnitLabel(item.unit)}</p>
+                    {lineDiscount > 0 ? <p className="discount-line">Sleva {formatCurrency(lineDiscount)}</p> : null}
                   </div>
-                  <div className="cart-quantity-block">
+                  <div className="cart-quantity-block" onClick={(event) => event.stopPropagation()}>
                     <div className="quantity-controls">
                       <button type="button" onClick={() => adjustQuantity(item.productId, -1)}>-</button>
                       <input
@@ -281,24 +519,150 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
                       />
                       <button type="button" onClick={() => adjustQuantity(item.productId, 1)}>+</button>
                     </div>
-                    <div className="cart-line-total">{formatCurrency(item.price * item.quantity)}</div>
+                    <div className="cart-line-total">{formatCurrency(lineTotal)}</div>
+                    <button className="ghost-button mini-edit-button" type="button" onClick={() => setEditingItemId(item.productId)}>Upravit</button>
                   </div>
                 </div>
               );
             })}
           </div>
-          <div className="checkout-box stack compact">
+
+          <div className="discount-card">
             <div className="section-title-row">
+              <strong>Sleva na celý nákup</strong>
+              {ticketDiscountAmount > 0 ? <span className="badge warning-badge">-{formatCurrency(ticketDiscountAmount)}</span> : null}
+            </div>
+            <div className="discount-controls">
+              <button type="button" className={`toggle-pill compact-pill ${activeTicket.discountMode !== 'percent' ? 'active' : ''}`} onClick={() => updateActiveTicketDiscount({ discountMode: 'amount' })}>Kč</button>
+              <button type="button" className={`toggle-pill compact-pill ${activeTicket.discountMode === 'percent' ? 'active' : ''}`} onClick={() => updateActiveTicketDiscount({ discountMode: 'percent' })}>%</button>
+              <input
+                type="number"
+                min="0"
+                step={activeTicket.discountMode === 'percent' ? '1' : '0.5'}
+                value={activeTicket.discountValue || ''}
+                onChange={(event) => updateActiveTicketDiscount({ discountValue: parseNumber(event.target.value) })}
+                placeholder="0"
+              />
+              {Number(activeTicket.discountValue) > 0 ? <button className="ghost-button small-btn" type="button" onClick={() => updateActiveTicketDiscount({ discountValue: 0 })}>Zrušit</button> : null}
+            </div>
+          </div>
+
+          <div className="checkout-box stack compact">
+            <div className="list-row"><span>Mezisoučet</span><strong>{formatCurrency(subtotalBeforeDiscounts)}</strong></div>
+            {totalDiscount > 0 ? <div className="list-row"><span>Slevy celkem</span><strong className="warning-text">-{formatCurrency(totalDiscount)}</strong></div> : null}
+            <div className="section-title-row checkout-total-row">
               <span>Celkem</span>
               <strong>{formatCurrency(total)}</strong>
             </div>
-            <p className="muted no-margin">U vážených položek můžeš prodávat po 0,001 kg. Záporný sklad prodej neblokuje.</p>
-            <button className="primary-button full-width" disabled={cart.length === 0} onClick={() => setPaymentOpen(true)}>
+            <p className="muted no-margin">U vážených položek se při kliknutí otevře okno pro zadání množství v kg.</p>
+            <button className="primary-button full-width touch-pay-button" disabled={cart.length === 0} onClick={() => setPaymentOpen(true)}>
               Zaplatit
             </button>
           </div>
+
+          {lastPrintableSale ? (
+            <div className="receipt-action-card">
+              <div>
+                <strong>Poslední doklad {lastPrintableSale.documentNumber}</strong>
+                <p className="muted no-margin">Tisk je výchozí vypnutý. Účtenku vytiskneš jen ručně tímto tlačítkem.</p>
+              </div>
+              <button
+                type="button"
+                className="print-receipt-button"
+                onClick={() => printSaleDocument(lastPrintableSale)}
+              >
+                <span className="print-receipt-icon">🖨️</span>
+                <span>Vytisknout účtenku</span>
+              </button>
+            </div>
+          ) : null}
         </aside>
       </div>
+
+      {weightProduct ? (
+        <div className="modal-backdrop">
+          <div className="modal touch-modal quantity-modal">
+            <div className="modal-header">
+              <div>
+                <h3>Zadat množství</h3>
+                <p className="muted">{weightProduct.name} · prodej na kg</p>
+              </div>
+              <button className="ghost-button" onClick={() => setWeightProduct(null)}>✕</button>
+            </div>
+            <div className="stack">
+              <label>Množství v kg
+                <input
+                  className="touch-number-input"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  value={weightQuantity}
+                  onChange={(event) => setWeightQuantity(event.target.value)}
+                  autoFocus
+                  placeholder="např. 0,250"
+                />
+              </label>
+              <div className="quick-qty-grid">
+                {['0.05', '0.10', '0.25', '0.50', '1.00'].map((value) => (
+                  <button key={value} type="button" className="ghost-button" onClick={() => setWeightQuantity(value)}>{value.replace('.', ',')} kg</button>
+                ))}
+              </div>
+              <div className="summary-box summary-box-inline">
+                <span>Cena</span>
+                <strong>{formatCurrency((Number(weightProduct.price) || 0) * sanitizePositiveQuantity(weightQuantity, weightProduct.unit))}</strong>
+              </div>
+              <div className="form-actions">
+                <button className="ghost-button" onClick={() => setWeightProduct(null)}>Zrušit</button>
+                <button className="primary-button touch-confirm-button" onClick={confirmWeightProduct}>Přidat do účtu</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingItem ? (
+        <div className="modal-backdrop">
+          <div className="modal touch-modal item-edit-modal">
+            <div className="modal-header">
+              <div>
+                <h3>Upravit položku</h3>
+                <p className="muted">{editingItem.name}</p>
+              </div>
+              <button className="ghost-button" onClick={() => setEditingItemId('')}>✕</button>
+            </div>
+            <div className="stack">
+              <div className="form-grid">
+                <label>Množství ({formatUnitLabel(editingItem.unit)})
+                  <input type="number" min={isWeightUnit(editingItem.unit) ? '0.001' : '1'} step={getQuantityStep(editingItem.unit)} value={editingItem.quantity} onChange={(event) => updateCartItem(editingItem.productId, { quantity: normalizeCartQuantity(event.target.value, editingItem.unit) })} />
+                </label>
+                <label>Cena za jednotku
+                  <input type="number" min="0" step="0.01" value={editingItem.price} onChange={(event) => updateCartItem(editingItem.productId, { price: parseNumber(event.target.value) })} />
+                </label>
+              </div>
+              <div className="inner-card stack compact">
+                <div className="section-title-row">
+                  <strong>Sleva na položku</strong>
+                  {getLineDiscountAmount(editingItem) > 0 ? <span className="badge warning-badge">-{formatCurrency(getLineDiscountAmount(editingItem))}</span> : null}
+                </div>
+                <div className="discount-controls">
+                  <button type="button" className={`toggle-pill compact-pill ${editingItem.discountType !== 'percent' ? 'active' : ''}`} onClick={() => updateCartItem(editingItem.productId, { discountType: 'amount' })}>Kč</button>
+                  <button type="button" className={`toggle-pill compact-pill ${editingItem.discountType === 'percent' ? 'active' : ''}`} onClick={() => updateCartItem(editingItem.productId, { discountType: 'percent' })}>%</button>
+                  <input type="number" min="0" step={editingItem.discountType === 'percent' ? '1' : '0.5'} value={editingItem.discountValue || ''} onChange={(event) => updateCartItem(editingItem.productId, { discountValue: parseNumber(event.target.value) })} placeholder="0" />
+                  {Number(editingItem.discountValue) > 0 ? <button className="ghost-button small-btn" type="button" onClick={() => updateCartItem(editingItem.productId, { discountValue: 0 })}>Zrušit</button> : null}
+                </div>
+              </div>
+              <div className="summary-box">
+                <div className="list-row"><span>Původní řádek</span><strong>{formatCurrency(getLineGross(editingItem))}</strong></div>
+                <div className="list-row"><span>Po slevě</span><strong>{formatCurrency(getLineTotal(editingItem))}</strong></div>
+              </div>
+              <div className="form-actions">
+                <button className="ghost-button danger-outline" onClick={() => removeCartItem(editingItem.productId)}>Odebrat položku</button>
+                <button className="primary-button touch-confirm-button" onClick={() => setEditingItemId('')}>Hotovo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PaymentDialog open={paymentOpen} onClose={() => setPaymentOpen(false)} total={total} documentNumberPreview={buildDocumentNumber(nextDocumentSequence || 1, new Date().toISOString())} onConfirm={handleCompleteSale} />
     </div>

@@ -587,3 +587,408 @@ a { color: inherit; text-decoration: none; }
   width: min(980px, calc(100vw - 24px));
   max-width: 980px;
 }
+
+/* Compact cashier/catalog mode for more products on screen */
+.cashier-layout { gap: 0.65rem; }
+.cashier-layout .page-header { align-items: flex-start; }
+.cashier-layout .page-header h1 { font-size: 1.55rem; }
+.cashier-layout .page-header p { font-size: 0.88rem; }
+.compact-card { padding: 0.65rem 0.8rem; border-radius: 14px; }
+.compact-button { padding: 0.48rem 0.7rem; border-radius: 9px; font-size: 0.86rem; }
+.ticket-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+.ticket-tabs {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+  flex: 1 1 auto;
+}
+.ticket-pill {
+  min-width: 120px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text);
+  padding: 0.48rem 0.65rem;
+  display: grid;
+  justify-items: start;
+  gap: 0.15rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.ticket-pill.active {
+  border-color: rgba(47,164,67,0.45);
+  background: #e8f7eb;
+  color: var(--accent-dark);
+}
+.ticket-pill span { font-weight: 800; font-size: 0.9rem; }
+.ticket-pill small { color: var(--muted); font-size: 0.75rem; }
+.ticket-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.compact-cashier-grid {
+  grid-template-columns: minmax(0, 1.95fr) minmax(360px, 0.72fr);
+  gap: 0.75rem;
+}
+.compact-cashier-grid > .card,
+.compact-cashier-grid .cart-panel { padding: 0.8rem; border-radius: 15px; }
+.compact-cashier-grid .toolbar { gap: 0.55rem; align-items: flex-start; }
+.compact-cashier-grid .search-input {
+  max-width: 320px;
+  padding: 0.58rem 0.75rem;
+  border-radius: 9px;
+}
+.compact-cashier-grid .category-tabs {
+  flex: 1 1 520px;
+  gap: 0.35rem;
+  max-height: 82px;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+.compact-cashier-grid .tab-pill {
+  padding: 0.42rem 0.64rem;
+  border-radius: 9px;
+  font-size: 0.84rem;
+}
+.compact-cashier-grid .product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+.compact-cashier-grid .product-tile {
+  min-height: 98px;
+  padding: 0.55rem 0.62rem;
+  border-radius: 12px;
+  gap: 0.14rem;
+  line-height: 1.16;
+  box-shadow: 0 2px 6px rgba(53, 79, 66, 0.05);
+}
+.compact-cashier-grid .product-tile strong {
+  font-size: 0.85rem;
+  line-height: 1.15;
+}
+.compact-cashier-grid .product-tile span { font-size: 0.78rem; }
+.compact-cashier-grid .product-tile small { font-size: 0.7rem; }
+.compact-cashier-grid .tile-category {
+  font-size: 0.69rem;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.compact-cashier-grid .tile-family { display: none; }
+.compact-cashier-grid .cart-panel { top: 0.6rem; }
+.compact-cashier-grid .cart-panel h2 { font-size: 1.25rem; }
+.compact-cashier-grid .cart-items { max-height: calc(100vh - 360px); min-height: 160px; }
+.compact-cashier-grid .cart-item-row {
+  gap: 0.55rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid #e6ece8;
+}
+.compact-cashier-grid .cart-item-row strong { font-size: 0.9rem; }
+.compact-cashier-grid .cart-item-row p { font-size: 0.78rem; }
+.compact-cashier-grid .quantity-controls { gap: 0.35rem; }
+.compact-cashier-grid .quantity-controls button { width: 28px; height: 28px; }
+.compact-cashier-grid .cart-quantity-input { width: 88px; padding: 0.42rem 0.45rem; }
+.compact-cashier-grid .checkout-box { padding: 0.75rem; border-radius: 13px; }
+
+@media (max-width: 1180px) {
+  .compact-cashier-grid { grid-template-columns: 1fr; }
+  .compact-cashier-grid .cart-panel { position: static; }
+  .ticket-bar { align-items: stretch; flex-direction: column; }
+  .ticket-actions { justify-content: flex-start; }
+}
+
+.receipt-toggle-row {
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f7fbf8;
+  font-weight: 700;
+}
+
+.receipt-action-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #f5fff7 0%, #ffffff 100%);
+  border: 1px solid rgba(47, 164, 67, 0.25);
+}
+
+.print-receipt-button {
+  min-height: 64px;
+  width: 100%;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #1f8e39 0%, #18742d 100%);
+  color: #fff;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  font-size: 1.04rem;
+  font-weight: 900;
+  box-shadow: 0 10px 20px rgba(31, 142, 57, 0.22);
+  touch-action: manipulation;
+}
+
+.print-receipt-button:active {
+  transform: translateY(1px);
+}
+
+.print-receipt-icon {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+/* v1.13: enforced light mode, stronger POS contrast, cashier usability */
+html, body, #root, .app-frame {
+  color-scheme: light only;
+  background: #eef3f1 !important;
+  color: var(--text) !important;
+}
+
+body.dark, .dark, [data-theme='dark'] {
+  background: #eef3f1 !important;
+  color: var(--text) !important;
+}
+
+.sidebar-collapse-button {
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 0.55rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text);
+  font-weight: 900;
+  touch-action: manipulation;
+}
+
+.nav-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #fff;
+}
+
+.nav-link.active .nav-icon { background: var(--accent); }
+.nav-link:not(.active) .nav-icon { background: #9fb0a7; }
+
+.sidebar-collapsed .app-shell { grid-template-columns: 72px 1fr; }
+.sidebar-collapsed .sidebar { padding-left: 0.55rem; padding-right: 0.55rem; }
+.sidebar-collapsed .nav-link { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .sidebar-note { display: none; }
+.sidebar-collapsed .nav-dot { margin: 0; }
+
+.cashier-shell-mode .content { padding: 0.65rem 0.75rem 1rem; }
+.cashier-page-header { display: none; }
+
+.sticky-ticket-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border: 2px solid rgba(47, 164, 67, 0.22);
+  background: linear-gradient(180deg, #ffffff 0%, #f2fbf4 100%);
+  box-shadow: 0 8px 22px rgba(33, 66, 42, 0.12);
+}
+
+.ticket-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ticket-pill {
+  min-height: 54px;
+  border-width: 2px;
+  touch-action: manipulation;
+}
+
+.ticket-pill.active {
+  box-shadow: inset 0 0 0 2px rgba(47, 164, 67, 0.34), 0 4px 10px rgba(47, 164, 67, 0.12);
+}
+
+.touch-add-ticket,
+.touch-pay-button,
+.touch-confirm-button {
+  min-height: 48px;
+  touch-action: manipulation;
+}
+
+.product-catalog-card { overflow: hidden; }
+
+.compact-cashier-grid {
+  grid-template-columns: minmax(0, 2.4fr) minmax(330px, 0.62fr);
+}
+
+.compact-cashier-grid .category-tabs {
+  max-height: 62px;
+}
+
+.compact-cashier-grid .product-grid.dense-product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 0.38rem;
+  max-height: calc(100vh - 202px);
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.compact-cashier-grid .product-tile.high-contrast-tile {
+  min-height: 86px;
+  padding: 0.48rem 0.52rem;
+  border-width: 2px;
+  background: linear-gradient(180deg, hsl(var(--tile-h) 92% 90% / 1), hsl(var(--tile-h) 82% 80% / 1));
+  border-color: hsl(var(--tile-h) 68% 44% / 1);
+  color: #101b14;
+}
+
+.compact-cashier-grid .product-tile.high-contrast-tile strong {
+  font-size: 0.8rem;
+  font-weight: 950;
+}
+
+.compact-cashier-grid .product-tile.high-contrast-tile .tile-price {
+  font-weight: 900;
+  font-size: 0.82rem;
+}
+
+.compact-cashier-grid .product-tile.high-contrast-tile small:nth-of-type(2) {
+  display: none;
+}
+
+.compact-cashier-grid .cart-items {
+  max-height: calc(100vh - 430px);
+}
+
+.editable-cart-row {
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 0.45rem;
+}
+
+.editable-cart-row:hover {
+  background: #f4faf6;
+}
+
+.mini-edit-button {
+  padding: 0.24rem 0.48rem;
+  font-size: 0.74rem;
+  border-radius: 8px;
+}
+
+.discount-line {
+  margin: 0.15rem 0 0;
+  color: #92530a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.discount-card {
+  padding: 0.72rem;
+  border-radius: 14px;
+  background: #fff9ec;
+  border: 1px solid rgba(243, 154, 31, 0.28);
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.65rem 0;
+}
+
+.discount-controls {
+  display: grid;
+  grid-template-columns: auto auto minmax(70px, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.discount-controls input {
+  padding: 0.5rem 0.6rem;
+}
+
+.checkout-total-row strong {
+  font-size: 1.2rem;
+}
+
+.touch-modal {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.touch-number-input {
+  min-height: 64px;
+  font-size: 1.65rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.quick-qty-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.quick-qty-grid button {
+  min-height: 48px;
+  font-weight: 800;
+}
+
+.cash-rounding-summary {
+  padding: 0.65rem 0.75rem;
+  border-radius: 14px;
+  background: #f8fbf8;
+  border: 1px solid var(--border);
+}
+
+/* Fix older imported payment-button variables with concrete light colors. */
+.payment-method-btn,
+.banknote-btn {
+  border-color: var(--border-strong) !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  color: var(--text) !important;
+}
+.payment-method-btn:hover,
+.banknote-btn:hover { background: #f4f8f5 !important; }
+.payment-method-btn.active,
+.banknote-btn.active {
+  background: #e4f5e8 !important;
+  border-color: rgba(47, 164, 67, 0.55) !important;
+  color: #155d25 !important;
+}
+.tip-input {
+  border-color: var(--border-strong) !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  color: var(--text) !important;
+}
+
+@media (max-width: 1180px) {
+  .compact-cashier-grid .product-grid.dense-product-grid { max-height: none; }
+}
+
+@media (max-width: 760px) {
+  .sidebar-collapsed .app-shell,
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar-collapsed .nav-label { display: inline; }
+  .sidebar-collapsed .sidebar-note { display: block; }
+  .ticket-bar-title { width: 100%; }
+  .discount-controls { grid-template-columns: auto auto 1fr; }
+  .discount-controls .small-btn { grid-column: 1 / -1; }
+  .quick-qty-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

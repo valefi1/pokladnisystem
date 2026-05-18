@@ -26,14 +26,17 @@ function renderLineItems(items = []) {
   return items
     .map((item) => {
       const qty = `${formatQuantity(item.quantity)} ${formatUnitLabel(item.unit || 'ks')}`;
-      const lineTotal = formatCurrency((Number(item.price) || 0) * (Number(item.quantity) || 0));
+      const gross = (Number(item.lineGross) || ((Number(item.price) || 0) * (Number(item.quantity) || 0)));
+      const discount = Number(item.lineDiscount) || 0;
+      const lineTotal = Number(item.lineTotal) || Math.max(0, gross - discount);
       return `
         <tr>
           <td>
             <strong>${escapeHtml(item.name)}</strong><br />
             <small>${escapeHtml(qty)} × ${escapeHtml(formatCurrency(item.price))}</small>
+            ${discount > 0 ? `<br /><small>Sleva položky: -${escapeHtml(formatCurrency(discount))}</small>` : ''}
           </td>
-          <td style="text-align:right; white-space:nowrap;">${escapeHtml(lineTotal)}</td>
+          <td style="text-align:right; white-space:nowrap;">${escapeHtml(formatCurrency(lineTotal))}</td>
         </tr>
       `;
     })
@@ -52,9 +55,13 @@ function buildDocumentHtml(sale, prefs) {
     ? `<p class="muted">Terminál: ${escapeHtml(sale.terminalProvider)} · ${escapeHtml(sale.terminalStatus || '—')}</p>`
     : '';
   const terminalRef = sale.terminalReference ? `<p class="muted">Ref: ${escapeHtml(sale.terminalReference)}</p>` : '';
-  const subtotal = Number(sale.subtotal ?? sale.total ?? 0);
+  const grossSubtotal = Number(sale.grossSubtotal ?? sale.subtotal ?? sale.total ?? 0);
+  const itemDiscountTotal = Number(sale.itemDiscountTotal) || 0;
+  const saleDiscountAmount = Number(sale.saleDiscountAmount) || 0;
+  const subtotal = Number(sale.subtotal ?? Math.max(0, grossSubtotal - itemDiscountTotal - saleDiscountAmount));
   const tipAmount = Number(sale.tipAmount) || 0;
-  const total = Number(sale.total) || subtotal + tipAmount;
+  const roundingAmount = Number(sale.roundingAmount) || 0;
+  const total = Number(sale.total) || subtotal + tipAmount + roundingAmount;
   const splitRows = Array.isArray(sale.splitLegs) && sale.splitLegs.length
     ? sale.splitLegs.map((leg) => `<tr><td>${escapeHtml(PAYMENT_LABELS[leg.method] || leg.method)}</td><td class="text-right">${escapeHtml(formatCurrency(leg.amount || 0))}</td></tr>`).join('')
     : '';
@@ -105,10 +112,17 @@ function buildDocumentHtml(sale, prefs) {
       <table class="summary">
         <tbody>
           <tr>
+            <td>Mezisoučet před slevami</td>
+            <td class="text-right">${escapeHtml(formatCurrency(grossSubtotal))}</td>
+          </tr>
+          ${itemDiscountTotal > 0 ? `<tr><td>Slevy položek</td><td class="text-right">-${escapeHtml(formatCurrency(itemDiscountTotal))}</td></tr>` : ''}
+          ${saleDiscountAmount > 0 ? `<tr><td>Sleva na nákup</td><td class="text-right">-${escapeHtml(formatCurrency(saleDiscountAmount))}</td></tr>` : ''}
+          <tr>
             <td>Mezisoučet</td>
             <td class="text-right">${escapeHtml(formatCurrency(subtotal))}</td>
           </tr>
           ${tipAmount > 0 ? `<tr><td>Spropitné</td><td class="text-right">${escapeHtml(formatCurrency(tipAmount))}</td></tr>` : ''}
+          ${roundingAmount !== 0 ? `<tr><td>Zaokrouhlení hotově</td><td class="text-right">${escapeHtml(formatCurrency(roundingAmount))}</td></tr>` : ''}
           <tr>
             <td>Celkem k úhradě</td>
             <td class="text-right totals">${escapeHtml(formatCurrency(total))}</td>
