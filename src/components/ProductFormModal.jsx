@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { PRODUCT_COLOR_PALETTE } from '../lib/catalogPresentation';
 import { grossFromNet, netFromGross, normalizeProductVatPricing } from '../lib/vat';
 
 const emptyProduct = {
@@ -14,6 +15,7 @@ const emptyProduct = {
   barcode: '',
   plu: '',
   hidden: false,
+  tileColor: '',
 };
 
 export function ProductFormModal({ open, onClose, onSave, product, existingCategories }) {
@@ -102,6 +104,15 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
               <option value="0">0 %</option>
               <option value="12">12 %</option>
               <option value="21">21 %</option>
+            </select>
+          </label>
+          <label>
+            Barva dlaždice v pokladně
+            <select value={form.tileColor || ''} onChange={(e) => handleChange('tileColor', e.target.value)}>
+              <option value="">Automatická podle produktu</option>
+              {PRODUCT_COLOR_PALETTE.map((color) => (
+                <option key={color.key} value={color.key}>{color.label}</option>
+              ))}
             </select>
           </label>
           <label className="checkbox-row full-row">

@@ -3,10 +3,10 @@ import { ProductFormModal } from '../components/ProductFormModal';
 import { formatCurrency, formatDaysToZero, formatQuantity } from '../lib/format';
 import { parseStockMovementHistoryCsv, parseStockSnapshotCsv } from '../lib/csvImport';
 import { parseDotykackaCsv, readFileAsText } from '../lib/parseDotykackaCsv';
-import { getProductMeta, sortProductsForCatalog, sortProductsWithinCategory } from '../lib/catalogPresentation';
+import { PRODUCT_COLOR_PALETTE, getProductMeta, sortProductsForCatalog, sortProductsWithinCategory } from '../lib/catalogPresentation';
 import { netFromGross } from '../lib/vat';
 
-export function ProductsPage({ products, categories, analyticsMap, onAddProduct, onUpdateProduct, onImportStockSnapshot, onImportMovementHistory, onImportDotykackaCsv }) {
+export function ProductsPage({ products, categories, analyticsMap, onAddProduct, onUpdateProduct, onUpdateProductPresentation, onImportStockSnapshot, onImportMovementHistory, onImportDotykackaCsv }) {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Vše');
   const [orderCategory, setOrderCategory] = useState('');
@@ -17,6 +17,7 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
   const movementInputRef = useRef(null);
   const dotykackaInputRef = useRef(null);
   const [importResult, setImportResult] = useState(null); // {updated, added, fileName}
+  const [dragProductId, setDragProductId] = useState('');
 
   const categoryOptions = useMemo(() => categories.filter((category) => category && category !== 'Vše'), [categories]);
 
@@ -71,22 +72,34 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const text = await file.text();
-    const importedProducts = parseStockSnapshotCsv(text);
-    onImportStockSnapshot(importedProducts, file.name);
-    setImportMessage(`Naimportován snapshot skladu: ${importedProducts.length} položek ze souboru ${file.name}.`);
-    event.target.value = '';
+    try {
+      setImportMessage('Načítám import a zapisuji ho do Supabase…');
+      const text = await file.text();
+      const importedProducts = parseStockSnapshotCsv(text);
+      await onImportStockSnapshot(importedProducts, file.name);
+      setImportMessage(`Naimportován snapshot skladu: ${importedProducts.length} položek ze souboru ${file.name}. Změny jsou zapsané do Supabase.`);
+    } catch (error) {
+      setImportMessage(`Chyba importu: ${error.message || 'nepodařilo se zapsat import do Supabase'}`);
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleMovementImport = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const text = await file.text();
-    const rows = parseStockMovementHistoryCsv(text);
-    onImportMovementHistory(rows, file.name);
-    setImportMessage(`Naimportována historie skladových pohybů: ${rows.length} řádků ze souboru ${file.name}.`);
-    event.target.value = '';
+    try {
+      setImportMessage('Načítám historii pohybů a zapisuji ji do Supabase…');
+      const text = await file.text();
+      const rows = parseStockMovementHistoryCsv(text);
+      await onImportMovementHistory(rows, file.name);
+      setImportMessage(`Naimportována historie skladových pohybů: ${rows.length} řádků ze souboru ${file.name}. Změny jsou zapsané do Supabase.`);
+    } catch (error) {
+      setImportMessage(`Chyba importu historie: ${error.message || 'nepodařilo se zapsat import do Supabase'}`);
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const handleDotykackaCsvImport = async (event) => {
@@ -95,7 +108,7 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
     try {
       const text = await readFileAsText(file);
       const products = parseDotykackaCsv(text);
-      onImportDotykackaCsv(products, file.name);
+      await onImportDotykackaCsv(products, file.name);
       setImportResult({ fileName: file.name, total: products.length });
     } catch (err) {
       setImportResult({ fileName: file.name, error: err.message });
@@ -107,7 +120,7 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
     nextOrderedProducts.forEach((product, index) => {
       const nextOrder = index + 1;
       if (Number(product.displayOrder) !== nextOrder) {
-        onUpdateProduct({ ...product, displayOrder: nextOrder });
+        onUpdateProductPresentation?.({ id: product.id, displayOrder: nextOrder });
       }
     });
   };
@@ -121,6 +134,32 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
     const [item] = next.splice(currentIndex, 1);
     next.splice(targetIndex, 0, item);
     saveManualOrder(next);
+  };
+
+  const setProductTileColor = (productId, tileColor) => {
+    onUpdateProductPresentation?.({ id: productId, tileColor });
+  };
+
+  const moveProductToPosition = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const sourceIndex = orderedCategoryProducts.findIndex((product) => product.id === sourceId);
+    const targetIndex = orderedCategoryProducts.findIndex((product) => product.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const next = [...orderedCategoryProducts];
+    const [item] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, item);
+    saveManualOrder(next);
+  };
+
+  const startTileDrag = (productId, event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    setDragProductId(productId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const finishTileDrag = (targetProductId) => {
+    if (dragProductId) moveProductToPosition(dragProductId, targetProductId);
+    setDragProductId('');
   };
 
   return (
@@ -184,13 +223,39 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
             {orderedCategoryProducts.map((product, index) => {
               const visual = getProductMeta(product, index);
               return (
-                <div key={product.id} className="product-order-tile" style={visual.style}>
+                <div
+                  key={product.id}
+                  className={`product-order-tile draggable-order-tile ${dragProductId === product.id ? 'dragging' : ''}`}
+                  style={visual.style}
+                  onPointerDown={(event) => startTileDrag(product.id, event)}
+                  onPointerUp={() => finishTileDrag(product.id)}
+                  onPointerCancel={() => setDragProductId('')}
+                >
                   <div>
                     <span className="order-number">#{index + 1}</span>
                     <strong>{product.name}</strong>
                     <small>{formatCurrency(product.priceWithVat ?? product.price)}</small>
+                    <small className="drag-hint">podrž a přetáhni na nové místo</small>
+                    <div className="tile-color-palette" onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        className={`color-swatch ${!product.tileColor ? 'active' : ''}`}
+                        title="Automatická barva"
+                        onClick={() => setProductTileColor(product.id, '')}
+                      >A</button>
+                      {PRODUCT_COLOR_PALETTE.map((color) => (
+                        <button
+                          key={color.key}
+                          type="button"
+                          className={`color-swatch ${product.tileColor === color.key ? 'active' : ''}`}
+                          style={{ '--tile-h': color.hue }}
+                          title={color.label}
+                          onClick={() => setProductTileColor(product.id, color.key)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <div className="order-buttons">
+                  <div className="order-buttons" onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
                     <button type="button" className="ghost-button small-btn" disabled={index === 0} onClick={() => moveProductInCategory(product.id, 'first')}>Na začátek</button>
                     <button type="button" className="ghost-button small-btn" disabled={index === 0} onClick={() => moveProductInCategory(product.id, -1)}>↑</button>
                     <button type="button" className="ghost-button small-btn" disabled={index === orderedCategoryProducts.length - 1} onClick={() => moveProductInCategory(product.id, 1)}>↓</button>

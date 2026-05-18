@@ -65,6 +65,16 @@ function productFromRow(row) {
   });
 }
 
+
+
+function presentationPatchFromProduct(product = {}) {
+  const patch = {};
+  if (Object.prototype.hasOwnProperty.call(product, 'displayOrder')) patch.displayOrder = product.displayOrder;
+  if (Object.prototype.hasOwnProperty.call(product, 'tileColor')) patch.tileColor = product.tileColor;
+  if (Object.prototype.hasOwnProperty.call(product, 'colorKey')) patch.colorKey = product.colorKey;
+  return patch;
+}
+
 function saleRow(userId, sale) {
   return {
     ...jsonRow(userId, sale),
@@ -409,6 +419,47 @@ async function syncSettings(userId, normalized) {
   // Compatibility fallback for older DBs. New schema.sql creates pos_settings.
   const fallback = await supabase.from('pos_setting').upsert(settingsRows, { onConflict: 'owner_id,key' });
   if (fallback.error && !isMissingRelation(fallback.error)) throw fallback.error;
+}
+
+
+export async function syncProductPresentationToSupabase(state, productIds = []) {
+  if (!supabaseConfigured || !supabase) return { skipped: true };
+  const userId = await getUserIdOrThrow();
+  const ids = [...new Set((productIds || []).filter(Boolean).map(String))];
+  if (!ids.length) return { ok: true, updated: 0 };
+
+  const normalized = normalizeState(state);
+  const localById = new Map((normalized.products || []).map((product) => [String(product.id), product]));
+  const { data, error } = await supabase
+    .from(SYNC_TABLES.products)
+    .select('*')
+    .eq('owner_id', userId)
+    .in('id', ids);
+  if (error) throw error;
+
+  const remoteById = new Map((data || []).map((row) => [String(row.id), row]));
+  const rows = ids.map((id) => {
+    const local = localById.get(id);
+    if (!local) return null;
+    const remote = remoteById.get(id);
+    if (!remote) return productRow(userId, local);
+    const payload = remote.payload && typeof remote.payload === 'object' ? remote.payload : {};
+    return {
+      ...remote,
+      owner_id: userId,
+      id,
+      payload: {
+        ...payload,
+        ...presentationPatchFromProduct(local),
+      },
+      updated_at: nowIso(),
+    };
+  }).filter(Boolean);
+
+  if (!rows.length) return { ok: true, updated: 0 };
+  const { error: upsertError } = await supabase.from(SYNC_TABLES.products).upsert(rows, { onConflict: 'owner_id,id' });
+  if (upsertError) throw upsertError;
+  return { ok: true, updated: rows.length };
 }
 
 export async function syncStateToSupabase(state) {

@@ -527,6 +527,29 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
         </div>
       </section>
 
+      <section className="cashier-category-band" aria-label="Kategorie produktů">
+        <div className="category-strip-wrap full-width-category-strip">
+          <div className="category-tabs category-tabs-one-line">
+            {orderedCategories.map((category, index) => {
+              const categoryMeta = getCategoryMeta(category, index);
+              return (
+                <button
+                  key={category}
+                  className={`tab-pill category-pill ${selectedCategory === category ? 'active' : ''}`}
+                  style={categoryMeta.style}
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category}
+                </button>
+              );
+            })}
+          </div>
+          <button className="all-categories-button" type="button" onClick={() => setCategoryPickerOpen(true)}>
+            Všechny kategorie
+          </button>
+        </div>
+      </section>
+
       <div className="cashier-grid compact-cashier-grid">
         <section className="card product-catalog-card">
           <div className="toolbar cashier-toolbar">
@@ -536,26 +559,6 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <div className="category-strip-wrap">
-              <div className="category-tabs category-tabs-one-line">
-                {orderedCategories.map((category, index) => {
-                  const categoryMeta = getCategoryMeta(category, index);
-                  return (
-                    <button
-                      key={category}
-                      className={`tab-pill category-pill ${selectedCategory === category ? 'active' : ''}`}
-                      style={categoryMeta.style}
-                      onClick={() => setSelectedCategory(category)}
-                    >
-                      {category}
-                    </button>
-                  );
-                })}
-              </div>
-              <button className="all-categories-button" type="button" onClick={() => setCategoryPickerOpen(true)}>
-                Všechny kategorie
-              </button>
-            </div>
           </div>
           <div className="product-grid dense-product-grid">
             {filteredProducts.map((product) => {

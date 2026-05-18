@@ -17,6 +17,28 @@ const semanticColorRules = [
   { hue: 10, keys: ['syr', 'halloumi', 'tvaroh', 'maslo', 'ghi', 'pareny', 'gouda', 'balkan'] },
 ];
 
+
+
+export const PRODUCT_COLOR_PALETTE = [
+  { key: 'sky', label: 'Modrá', hue: 206 },
+  { key: 'cyan', label: 'Tyrkysová', hue: 184 },
+  { key: 'mint', label: 'Mátová', hue: 154 },
+  { key: 'lime', label: 'Limetková', hue: 92 },
+  { key: 'yellow', label: 'Žlutá', hue: 48 },
+  { key: 'orange', label: 'Oranžová', hue: 28 },
+  { key: 'rose', label: 'Růžová', hue: 340 },
+  { key: 'violet', label: 'Fialová', hue: 270 },
+  { key: 'slate', label: 'Šedá', hue: 215 },
+];
+
+export function getPaletteColor(key) {
+  return PRODUCT_COLOR_PALETTE.find((item) => item.key === key) || null;
+}
+
+function buildStyleFromHue(hue) {
+  return { '--tile-h': `${Number(hue) || 206}` };
+}
+
 const familyRules = [
   ['kefíry', ['kefir']],
   ['jogurty', ['jogurt']],
@@ -123,9 +145,12 @@ export function getCategoryMeta(category, index = 0) {
 }
 
 export function getProductMeta(product, groupIndex = 0) {
+  const customColor = getPaletteColor(product?.tileColor || product?.colorKey || product?.productColor);
   return {
     family: getFamilyKey(product),
     variant: getVariantKey(product),
-    style: buildVisualStyle(product, groupIndex),
+    style: customColor ? buildStyleFromHue(customColor.hue) : buildVisualStyle(product, 0),
+    colorKey: customColor?.key || '',
+    colorLabel: customColor?.label || 'Automatická',
   };
 }

@@ -17,6 +17,7 @@ function PosApp() {
     derived,
     addProduct,
     updateProduct,
+    updateProductPresentation,
     importStockSnapshot,
     importDotykackaCsv,
     importMovementHistory,
@@ -97,6 +98,7 @@ function PosApp() {
                 analyticsMap={derived.daysToZeroMap}
                 onAddProduct={addProduct}
                 onUpdateProduct={updateProduct}
+                onUpdateProductPresentation={updateProductPresentation}
                 onImportStockSnapshot={importStockSnapshot} onImportDotykackaCsv={importDotykackaCsv}
                 onImportMovementHistory={importMovementHistory}
               />

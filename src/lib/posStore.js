@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { loadState, resetState, saveState } from './storage';
-import { loadRemoteState, syncStateToSupabase, getSyncModeLabel } from './supabaseSync';
+import { loadRemoteState, syncStateToSupabase, syncProductPresentationToSupabase, getSyncModeLabel } from './supabaseSync';
 import { supabaseConfigured } from './supabaseClient';
 import { buildVatBreakdown, netFromGross, normalizeProductVatPricing, roundMoney, vatFromGross } from './vat';
 
@@ -175,6 +175,18 @@ function reducer(state, action) {
             : product
         ),
         auditLog: [auditEntry('update', 'product', action.payload.id, action.payload.name || 'Úprava produktu', action.payload), ...state.auditLog],
+      };
+    }
+    case 'UPDATE_PRODUCT_PRESENTATION': {
+      const allowed = ['displayOrder', 'tileColor', 'colorKey'];
+      const patch = Object.fromEntries(Object.entries(action.payload || {}).filter(([key]) => allowed.includes(key)));
+      return {
+        ...state,
+        products: state.products.map((product) =>
+          product.id === action.payload.id
+            ? { ...product, ...patch, analyticsKey: getProductKey(product) }
+            : product
+        ),
       };
     }
     case 'IMPORT_STOCK_SNAPSHOT': {
@@ -763,15 +775,56 @@ export function usePosStore() {
   const remoteLoadSucceededRef = useRef(false);
   const pendingLocalWriteRef = useRef(false);
   const lastLocalChangeAtRef = useRef(0);
+  const fullDirtyRef = useRef(false);
+  const presentationDirtyProductIdsRef = useRef(new Set());
 
-  const markLocalChange = () => {
+  const markLocalChange = (mode = 'full', productId = null) => {
     pendingLocalWriteRef.current = true;
     lastLocalChangeAtRef.current = Date.now();
+    if (mode === 'presentation') {
+      if (productId) presentationDirtyProductIdsRef.current.add(String(productId));
+      return;
+    }
+    fullDirtyRef.current = true;
   };
 
   const dispatchLocal = (action) => {
-    markLocalChange();
+    markLocalChange('full');
     dispatch(action);
+  };
+
+  const dispatchPresentationLocal = (payload) => {
+    markLocalChange('presentation', payload?.id);
+    dispatch({ type: 'UPDATE_PRODUCT_PRESENTATION', payload });
+  };
+
+  const dispatchFullAndSyncImmediately = async (action) => {
+    markLocalChange('full');
+    const nextState = reducer(state, action);
+    dispatch(action);
+    saveState(nextState);
+
+    if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) {
+      return { skipped: true };
+    }
+
+    try {
+      setSyncStatus({ mode: getSyncModeLabel(), state: 'syncing', message: 'Zapisuji import do Supabase…' });
+      const result = await syncStateToSupabase(nextState);
+      if (!result?.skipped) {
+        fullDirtyRef.current = false;
+        presentationDirtyProductIdsRef.current.clear();
+        pendingLocalWriteRef.current = false;
+        lastLocalChangeAtRef.current = Date.now();
+        setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Import zapsán do Supabase.' });
+      }
+      return result;
+    } catch (error) {
+      fullDirtyRef.current = true;
+      pendingLocalWriteRef.current = true;
+      setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Import se nepodařilo zapsat do Supabase.' });
+      throw error;
+    }
   };
 
   useEffect(() => {
@@ -828,13 +881,26 @@ export function usePosStore() {
     saveState(state);
     const timeout = window.setTimeout(() => {
       if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) return;
-      syncStateToSupabase(state)
+      const presentationIds = [...presentationDirtyProductIdsRef.current];
+      const syncPromise = fullDirtyRef.current
+        ? syncStateToSupabase(state)
+        : presentationIds.length
+          ? syncProductPresentationToSupabase(state, presentationIds)
+          : Promise.resolve({ skipped: true, noop: true });
+
+      syncPromise
         .then((result) => {
+          if (result?.noop) return;
           if (result?.skipped) {
             setSyncStatus({ mode: getSyncModeLabel(), state: 'local', message: 'Ukládám lokálně. Supabase není nastavený.' });
             return;
           }
-          pendingLocalWriteRef.current = false;
+          if (fullDirtyRef.current) {
+            fullDirtyRef.current = false;
+          } else {
+            presentationIds.forEach((id) => presentationDirtyProductIdsRef.current.delete(id));
+          }
+          pendingLocalWriteRef.current = fullDirtyRef.current || presentationDirtyProductIdsRef.current.size > 0;
           setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Synchronizováno se Supabase.' });
         })
         .catch((error) => {
@@ -936,9 +1002,10 @@ export function usePosStore() {
     remoteLoadOk,
     addProduct: (payload) => dispatchLocal({ type: 'ADD_PRODUCT', payload }),
     updateProduct: (payload) => dispatchLocal({ type: 'UPDATE_PRODUCT', payload }),
-    importStockSnapshot: (products, fileName) => dispatchLocal({ type: 'IMPORT_STOCK_SNAPSHOT', payload: { products, fileName } }),
-    importDotykackaCsv: (products, fileName) => dispatchLocal({ type: 'IMPORT_DOTYKACKA_CSV', payload: { products, fileName } }),
-    importMovementHistory: (rows, fileName) => dispatchLocal({ type: 'IMPORT_MOVEMENT_HISTORY', payload: { rows, fileName } }),
+    updateProductPresentation: (payload) => dispatchPresentationLocal(payload),
+    importStockSnapshot: (products, fileName) => dispatchFullAndSyncImmediately({ type: 'IMPORT_STOCK_SNAPSHOT', payload: { products, fileName } }),
+    importDotykackaCsv: (products, fileName) => dispatchFullAndSyncImmediately({ type: 'IMPORT_DOTYKACKA_CSV', payload: { products, fileName } }),
+    importMovementHistory: (rows, fileName) => dispatchFullAndSyncImmediately({ type: 'IMPORT_MOVEMENT_HISTORY', payload: { rows, fileName } }),
     applyStockMovement: (payload) => dispatchLocal({ type: 'APPLY_STOCK_MOVEMENT', payload }),
     completeSale: (payload) => dispatchLocal({ type: 'COMPLETE_SALE', payload }),
     addSupplier: (payload) => dispatchLocal({ type: 'ADD_SUPPLIER', payload }),
