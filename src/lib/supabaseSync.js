@@ -45,6 +45,26 @@ function productRow(userId, product) {
   };
 }
 
+function productFromRow(row) {
+  // Older versions stored the source of truth inside payload. Newer versions also keep searchable columns.
+  // Merge columns over payload so fixes made directly in Supabase are reflected in the app immediately.
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return normalizeProductVatPricing({
+    ...payload,
+    id: row.id ?? payload.id,
+    name: row.name ?? payload.name,
+    category: row.category ?? payload.category,
+    barcode: row.barcode ?? payload.barcode,
+    plu: row.plu ?? payload.plu,
+    price: row.price_with_vat ?? row.price ?? payload.priceWithVat ?? payload.price,
+    priceWithVat: row.price_with_vat ?? row.price ?? payload.priceWithVat ?? payload.price,
+    priceWithoutVat: row.price_without_vat ?? payload.priceWithoutVat,
+    vatRate: row.vat_rate ?? payload.vatRate,
+    stock: row.stock ?? payload.stock,
+    hidden: row.hidden ?? payload.hidden,
+  });
+}
+
 function saleRow(userId, sale) {
   return {
     ...jsonRow(userId, sale),
@@ -59,6 +79,22 @@ function saleRow(userId, sale) {
   };
 }
 
+function saleFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    documentNumber: row.document_number ?? payload.documentNumber,
+    createdAt: row.created_at ?? payload.createdAt,
+    paymentMethod: row.payment_method ?? payload.paymentMethod,
+    total: Number(row.total ?? payload.total) || 0,
+    subtotalWithoutVat: Number(row.total_without_vat ?? payload.subtotalWithoutVat) || 0,
+    vatTotal: Number(row.vat_total ?? payload.vatTotal) || 0,
+    tipAmount: Number(row.tip_amount ?? payload.tipAmount) || 0,
+    unpaid: Boolean(row.unpaid ?? payload.unpaid),
+  };
+}
+
 function movementRow(userId, movement) {
   return {
     ...jsonRow(userId, movement),
@@ -69,12 +105,35 @@ function movementRow(userId, movement) {
   };
 }
 
+function movementFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    productId: row.product_id ?? payload.productId,
+    type: row.movement_type ?? payload.type,
+    quantity: Number(row.quantity ?? payload.quantity) || 0,
+    createdAt: row.created_at ?? payload.createdAt,
+  };
+}
+
 function supplierRow(userId, supplier) {
   return {
     ...jsonRow(userId, supplier),
     name: supplier.name || '',
     vat_no: supplier.vatNo || '',
     vat_id: supplier.vatId || '',
+  };
+}
+
+function supplierFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    name: row.name ?? payload.name,
+    vatNo: row.vat_no ?? payload.vatNo,
+    vatId: row.vat_id ?? payload.vatId,
   };
 }
 
@@ -88,6 +147,18 @@ function receiptRow(userId, receipt) {
   };
 }
 
+function receiptFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    supplierName: row.supplier_name ?? payload.supplierName,
+    documentNumber: row.document_number ?? payload.documentNumber,
+    stockedAt: row.stocked_at ?? payload.stockedAt,
+    totalCost: Number(row.total_cost ?? payload.totalCost) || 0,
+  };
+}
+
 function auditRow(userId, entry) {
   return {
     ...jsonRow(userId, entry),
@@ -98,6 +169,17 @@ function auditRow(userId, entry) {
   };
 }
 
+function auditFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    action: row.action ?? payload.action,
+    entityType: row.entity_type ?? payload.entityType,
+    entityId: row.entity_id ?? payload.entityId,
+    createdAt: row.created_at ?? payload.createdAt,
+  };
+}
 
 function cashSessionRow(userId, session) {
   return {
@@ -118,6 +200,26 @@ function cashSessionRow(userId, session) {
   };
 }
 
+function cashSessionFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    businessDate: row.business_date ?? payload.businessDate,
+    openedAt: row.opened_at ?? payload.openedAt,
+    closedAt: row.closed_at ?? payload.closedAt,
+    openingCash: Number(row.opening_cash ?? payload.openingCash) || 0,
+    openingCashBreakdown: row.opening_cash_breakdown ?? payload.openingCashBreakdown ?? {},
+    expectedOpeningCash: row.expected_opening_cash ?? payload.expectedOpeningCash ?? null,
+    openingDifference: row.opening_difference ?? payload.openingDifference ?? null,
+    previousCashSessionId: row.previous_cash_session_id ?? payload.previousCashSessionId ?? '',
+    countedCash: row.counted_cash ?? payload.countedCash ?? null,
+    closingCashBreakdown: row.closing_cash_breakdown ?? payload.closingCashBreakdown ?? {},
+    expectedCash: row.expected_cash ?? payload.expectedCash ?? null,
+    cashDifference: row.cash_difference ?? payload.cashDifference ?? null,
+    status: row.status ?? payload.status ?? (row.closed_at ? 'closed' : 'open'),
+  };
+}
 
 function lineGross(item) {
   return (Number(item.priceWithVat ?? item.price) || 0) * (Number(item.quantity) || 0);
@@ -152,6 +254,16 @@ function parkedTicketRow(userId, ticket) {
   };
 }
 
+function parkedTicketFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    name: row.name ?? payload.name ?? 'Účet',
+    status: row.status ?? payload.status ?? 'open',
+  };
+}
+
 function closureRow(userId, closure) {
   return {
     ...jsonRow(userId, closure),
@@ -160,6 +272,19 @@ function closureRow(userId, closure) {
     total_cash: Number(closure.totalCash) || 0,
     total_card: Number(closure.totalCard) || 0,
     total_revenue: Number(closure.totalRevenue) || 0,
+  };
+}
+
+function closureFromRow(row) {
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  return {
+    ...payload,
+    id: row.id ?? payload.id,
+    closedAt: row.closed_at ?? payload.closedAt,
+    businessDate: row.business_date ?? payload.businessDate,
+    totalCash: Number(row.total_cash ?? payload.totalCash) || 0,
+    totalCard: Number(row.total_card ?? payload.totalCard) || 0,
+    totalRevenue: Number(row.total_revenue ?? payload.totalRevenue) || 0,
   };
 }
 
@@ -176,10 +301,65 @@ const rowBuilders = {
   parkedTickets: parkedTicketRow,
 };
 
+const rowReaders = {
+  products: productFromRow,
+  sales: saleFromRow,
+  movements: movementFromRow,
+  movementHistory: movementFromRow,
+  suppliers: supplierFromRow,
+  stockReceipts: receiptFromRow,
+  auditLog: auditFromRow,
+  dayClosures: closureFromRow,
+  cashSessions: cashSessionFromRow,
+  parkedTickets: parkedTicketFromRow,
+};
+
 async function getUserIdOrThrow() {
   const user = await getSupabaseUser();
   if (!user?.id) throw new Error('Supabase je nastavený, ale uživatel není přihlášený.');
   return user.id;
+}
+
+function isMissingRelation(error) {
+  return error?.code === '42P01' || /does not exist|relation .* does not exist/i.test(error?.message || '');
+}
+
+async function readTable(key, table, userId) {
+  const orderColumn = key === 'sales' ? 'created_at' : key === 'cashSessions' ? 'opened_at' : 'updated_at';
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('owner_id', userId)
+    .order(orderColumn, { ascending: false });
+
+  if (error) throw error;
+  const reader = rowReaders[key] || ((row) => row?.payload);
+  return (data || []).map((row) => reader(row)).filter(Boolean);
+}
+
+async function readSettings(userId) {
+  async function readFrom(tableName) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('key,payload')
+      .eq('owner_id', userId);
+    if (error) throw error;
+    return Object.fromEntries((data || []).map((row) => [row.key, row.payload]));
+  }
+
+  try {
+    return await readFrom('pos_settings');
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+  }
+
+  // Compatibility with early builds that accidentally created pos_setting singular.
+  try {
+    return await readFrom('pos_setting');
+  } catch (error) {
+    if (!isMissingRelation(error)) throw error;
+    return {};
+  }
 }
 
 export async function loadRemoteState() {
@@ -188,23 +368,10 @@ export async function loadRemoteState() {
   const next = normalizeState(emptyState);
 
   for (const [key, table] of Object.entries(SYNC_TABLES)) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('payload')
-      .eq('owner_id', userId)
-      .order(key === 'sales' ? 'created_at' : 'updated_at', { ascending: false });
-
-    if (error) throw error;
-    next[key] = (data || []).map((row) => row.payload).filter(Boolean);
+    next[key] = await readTable(key, table, userId);
   }
 
-  const { data: settingsData, error: settingsError } = await supabase
-    .from('pos_settings')
-    .select('key,payload')
-    .eq('owner_id', userId);
-  if (settingsError) throw settingsError;
-
-  const settings = Object.fromEntries((settingsData || []).map((row) => [row.key, row.payload]));
+  const settings = await readSettings(userId);
   next.imports = settings.imports || {};
   next.stockReceiptDraft = settings.stockReceiptDraft || null;
   return normalizeState(next);
@@ -229,6 +396,21 @@ async function deleteMissingParkedTickets(userId, normalized) {
   if (error) throw error;
 }
 
+async function syncSettings(userId, normalized) {
+  const settingsRows = [
+    { owner_id: userId, key: 'imports', payload: normalized.imports || {}, updated_at: nowIso() },
+    { owner_id: userId, key: 'stockReceiptDraft', payload: normalized.stockReceiptDraft || null, updated_at: nowIso() },
+  ];
+
+  const { error } = await supabase.from('pos_settings').upsert(settingsRows, { onConflict: 'owner_id,key' });
+  if (!error) return;
+  if (!isMissingRelation(error)) throw error;
+
+  // Compatibility fallback for older DBs. New schema.sql creates pos_settings.
+  const fallback = await supabase.from('pos_setting').upsert(settingsRows, { onConflict: 'owner_id,key' });
+  if (fallback.error && !isMissingRelation(fallback.error)) throw fallback.error;
+}
+
 export async function syncStateToSupabase(state) {
   if (!supabaseConfigured || !supabase) return { skipped: true };
   const userId = await getUserIdOrThrow();
@@ -243,13 +425,7 @@ export async function syncStateToSupabase(state) {
   }
 
   await deleteMissingParkedTickets(userId, normalized);
-
-  const settingsRows = [
-    { owner_id: userId, key: 'imports', payload: normalized.imports || {}, updated_at: nowIso() },
-    { owner_id: userId, key: 'stockReceiptDraft', payload: normalized.stockReceiptDraft || null, updated_at: nowIso() },
-  ];
-  const { error: settingsError } = await supabase.from('pos_settings').upsert(settingsRows, { onConflict: 'owner_id,key' });
-  if (settingsError) throw settingsError;
+  await syncSettings(userId, normalized);
   return { ok: true };
 }
 

@@ -221,3 +221,12 @@ end $$;
 -- v1.16: IMPORTANT - one-time correction for older products whose stored price was originally WITHOUT VAT.
 -- Do NOT put that correction here because schema.sql can be run repeatedly.
 -- Use supabase/fix_existing_product_prices_net_to_gross.sql exactly once if your current visible prices are net prices displayed as gross.
+
+-- v1.17 compatibility: ensure settings table exists even for databases created by older builds.
+create table if not exists public.pos_settings (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  key text not null,
+  payload jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (owner_id, key)
+);

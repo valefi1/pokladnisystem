@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { loadState, resetState, saveState } from './storage';
 import { loadRemoteState, syncStateToSupabase, getSyncModeLabel } from './supabaseSync';
+import { supabaseConfigured } from './supabaseClient';
 import { buildVatBreakdown, netFromGross, normalizeProductVatPricing, roundMoney, vatFromGross } from './vat';
 
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -755,8 +756,11 @@ function getInventoryAnalytics(products, movementHistory) {
 
 export function usePosStore() {
   const [state, dispatch] = useReducer(reducer, undefined, loadState);
-  const [syncStatus, setSyncStatus] = useState({ mode: getSyncModeLabel(), state: 'local', message: 'Lokální data připravena.' });
+  const [syncStatus, setSyncStatus] = useState({ mode: getSyncModeLabel(), state: supabaseConfigured ? 'loading' : 'local', message: supabaseConfigured ? 'Načítám data ze Supabase…' : 'Lokální data připravena.' });
+  const [remoteReady, setRemoteReady] = useState(!supabaseConfigured);
+  const [remoteLoadOk, setRemoteLoadOk] = useState(!supabaseConfigured);
   const remoteLoadedRef = useRef(false);
+  const remoteLoadSucceededRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -764,6 +768,9 @@ export function usePosStore() {
       .then((remoteState) => {
         if (cancelled) return;
         remoteLoadedRef.current = true;
+        remoteLoadSucceededRef.current = true;
+        setRemoteReady(true);
+        setRemoteLoadOk(true);
         if (remoteState) {
           dispatch({ type: 'HYDRATE_REMOTE', payload: remoteState });
           setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Načteno ze Supabase.' });
@@ -771,14 +778,17 @@ export function usePosStore() {
       })
       .catch((error) => {
         remoteLoadedRef.current = true;
-        setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Supabase načtení selhalo.' });
+        remoteLoadSucceededRef.current = false;
+        setRemoteReady(true);
+        setRemoteLoadOk(false);
+        setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Supabase načtení selhalo. Ukládání do Supabase je pozastavené, aby se nepřepsala data.' });
       });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      if (!remoteLoadedRef.current) return;
+      if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) return;
       loadRemoteState()
         .then((remoteState) => {
           if (remoteState) {
@@ -787,7 +797,9 @@ export function usePosStore() {
           }
         })
         .catch((error) => {
-          setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Supabase načtení selhalo.' });
+          remoteLoadSucceededRef.current = false;
+          setRemoteLoadOk(false);
+          setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message || 'Supabase načtení selhalo. Ukládání do Supabase je pozastavené.' });
         });
     }, 8000);
     return () => window.clearInterval(interval);
@@ -796,7 +808,7 @@ export function usePosStore() {
   useEffect(() => {
     saveState(state);
     const timeout = window.setTimeout(() => {
-      if (!remoteLoadedRef.current) return;
+      if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) return;
       syncStateToSupabase(state)
         .then((result) => {
           if (result?.skipped) {
@@ -900,6 +912,8 @@ export function usePosStore() {
     state,
     derived,
     syncStatus,
+    remoteReady,
+    remoteLoadOk,
     addProduct: (payload) => dispatch({ type: 'ADD_PRODUCT', payload }),
     updateProduct: (payload) => dispatch({ type: 'UPDATE_PRODUCT', payload }),
     importStockSnapshot: (products, fileName) => dispatch({ type: 'IMPORT_STOCK_SNAPSHOT', payload: { products, fileName } }),

@@ -1,16 +1,17 @@
 import { demoState } from '../data/demoData';
-import { normalizeState } from '../data/initialState';
+import { emptyState, normalizeState } from '../data/initialState';
+import { supabaseConfigured } from './supabaseClient';
 
 const STORAGE_KEY = 'nezavisla-pos-web-mvp-v9';
 
 export function loadState() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return normalizeState(demoState);
+    if (!raw) return normalizeState(supabaseConfigured ? emptyState : demoState);
     return normalizeState(JSON.parse(raw));
   } catch (error) {
     console.error('Nepodařilo se načíst lokální data', error);
-    return normalizeState(demoState);
+    return normalizeState(supabaseConfigured ? emptyState : demoState);
   }
 }
 
@@ -24,5 +25,5 @@ export function saveState(state) {
 
 export function resetState() {
   window.localStorage.removeItem(STORAGE_KEY);
-  return normalizeState(demoState);
+  return normalizeState(supabaseConfigured ? emptyState : demoState);
 }

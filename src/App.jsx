@@ -35,7 +35,34 @@ function PosApp() {
     deleteParkedTicket,
     resetDemo,
     syncStatus,
+    remoteReady,
+    remoteLoadOk,
   } = usePosStore();
+
+  if (!remoteReady) {
+    return (
+      <div className="auth-screen">
+        <div className="card auth-card">
+          <div className="brand-badge">PS</div>
+          <h1>Načítám pokladnu…</h1>
+          <p className="muted">Stahuji produkty, otevřenou kasu a účty ze Supabase.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!remoteLoadOk) {
+    return (
+      <div className="auth-screen">
+        <div className="card auth-card">
+          <div className="brand-badge danger">!</div>
+          <h1>Nepodařilo se načíst Supabase</h1>
+          <p className="muted">{syncStatus.message}</p>
+          <p className="muted">Zkontroluj, že je spuštěné aktuální <code>supabase/schema.sql</code> a že existuje tabulka <code>pos_settings</code>.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <HashRouter>
