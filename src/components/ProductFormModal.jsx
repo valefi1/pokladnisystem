@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { grossFromNet, netFromGross, normalizeProductVatPricing } from '../lib/vat';
 
 const emptyProduct = {
   name: '',
   category: '',
   price: 0,
+  priceWithVat: 0,
+  priceWithoutVat: 0,
   costPrice: 0,
   vatRate: 12,
   stock: 0,
@@ -17,7 +20,7 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
   const [form, setForm] = useState(emptyProduct);
 
   useEffect(() => {
-    setForm(product ? { ...product } : emptyProduct);
+    setForm(product ? normalizeProductVatPricing(product) : emptyProduct);
   }, [product]);
 
   if (!open) return null;
@@ -30,7 +33,7 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
     event.preventDefault();
     onSave({
       ...form,
-      price: Number(form.price) || 0,
+      ...normalizeProductVatPricing({ ...form, priceWithVat: Number(form.priceWithVat ?? form.price) || 0 }),
       costPrice: Number(form.costPrice) || 0,
       vatRate: Number(form.vatRate) || 12,
       stock: Number(form.stock) || 0,
@@ -44,7 +47,7 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
         <div className="modal-header">
           <div>
             <h3>{product ? 'Upravit produkt' : 'Nový produkt'}</h3>
-            <p className="muted">Jednoduchý katalog pro pokladnu, sklad a analytiku days to zero.</p>
+            <p className="muted">Prodejní cena se zadává s DPH. Pokladna zároveň dopočítá a ukládá cenu bez DPH.</p>
           </div>
           <button className="ghost-button" onClick={onClose}>Zavřít</button>
         </div>
@@ -63,8 +66,12 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
             </datalist>
           </label>
           <label>
+            Prodejní cena s DPH
+            <input type="number" min="0" step="0.01" value={form.priceWithVat ?? form.price ?? 0} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithVat', value); handleChange('price', value); handleChange('priceWithoutVat', netFromGross(value, form.vatRate)); }} />
+          </label>
+          <label>
             Prodejní cena bez DPH
-            <input type="number" min="0" step="0.001" value={form.price} onChange={(e) => handleChange('price', e.target.value)} />
+            <input type="number" min="0" step="0.01" value={form.priceWithoutVat ?? netFromGross(form.priceWithVat ?? form.price, form.vatRate)} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithoutVat', value); const gross = grossFromNet(value, form.vatRate); handleChange('priceWithVat', gross); handleChange('price', gross); }} />
           </label>
           <label>
             Nákupní cena bez DPH
@@ -88,14 +95,14 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
           <label>
             PLU
             <input value={form.plu} onChange={(e) => handleChange('plu', e.target.value)} />
-            <label>
-              Sazba DPH
-              <select value={form.vatRate} onChange={(e) => handleChange('vatRate', e.target.value)}>
-                <option value="0">0 %</option>
-                <option value="12">12 %</option>
-                <option value="21">21 %</option>
-              </select>
-            </label>
+          </label>
+          <label>
+            Sazba DPH
+            <select value={form.vatRate} onChange={(e) => { const vatRate = Number(e.target.value) || 0; handleChange('vatRate', vatRate); handleChange('priceWithoutVat', netFromGross(form.priceWithVat ?? form.price, vatRate)); }}>
+              <option value="0">0 %</option>
+              <option value="12">12 %</option>
+              <option value="21">21 %</option>
+            </select>
           </label>
           <label className="checkbox-row full-row">
             <input type="checkbox" checked={form.hidden} onChange={(e) => handleChange('hidden', e.target.checked)} />

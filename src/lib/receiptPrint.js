@@ -2,6 +2,7 @@ import { formatCurrency, formatDateTime, formatQuantity } from './format';
 import { formatUnitLabel } from './productUnits';
 import { addDeviceLog } from './deviceDebug';
 import { loadDevicePrefs } from './devicePrefs';
+import { buildVatBreakdown, netFromGross } from './vat';
 
 const PAYMENT_LABELS = {
   card: 'Karta',
@@ -33,7 +34,7 @@ function renderLineItems(items = []) {
         <tr>
           <td>
             <strong>${escapeHtml(item.name)}</strong><br />
-            <small>${escapeHtml(qty)} × ${escapeHtml(formatCurrency(item.price))}</small>
+            <small>${escapeHtml(qty)} × ${escapeHtml(formatCurrency(item.priceWithVat ?? item.price))} s DPH</small>
             ${discount > 0 ? `<br /><small>Sleva položky: -${escapeHtml(formatCurrency(discount))}</small>` : ''}
           </td>
           <td style="text-align:right; white-space:nowrap;">${escapeHtml(formatCurrency(lineTotal))}</td>
@@ -59,6 +60,10 @@ function buildDocumentHtml(sale, prefs) {
   const itemDiscountTotal = Number(sale.itemDiscountTotal) || 0;
   const saleDiscountAmount = Number(sale.saleDiscountAmount) || 0;
   const subtotal = Number(sale.subtotal ?? Math.max(0, grossSubtotal - itemDiscountTotal - saleDiscountAmount));
+  const vatBreakdown = Array.isArray(sale.vatBreakdown) && sale.vatBreakdown.length ? sale.vatBreakdown : buildVatBreakdown(sale.items || [], saleDiscountAmount);
+  const subtotalWithoutVat = Number(sale.subtotalWithoutVat ?? vatBreakdown.reduce((sum, row) => sum + (Number(row.base) || 0), 0));
+  const vatTotal = Number(sale.vatTotal ?? vatBreakdown.reduce((sum, row) => sum + (Number(row.vat) || 0), 0));
+  const vatRows = vatBreakdown.map((row) => `<tr><td>DPH ${escapeHtml(row.vatRate)} %</td><td class="text-right">${escapeHtml(formatCurrency(row.vat || 0))}</td></tr>`).join('');
   const tipAmount = Number(sale.tipAmount) || 0;
   const roundingAmount = Number(sale.roundingAmount) || 0;
   const total = Number(sale.total) || subtotal + tipAmount + roundingAmount;
@@ -118,7 +123,12 @@ function buildDocumentHtml(sale, prefs) {
           ${itemDiscountTotal > 0 ? `<tr><td>Slevy položek</td><td class="text-right">-${escapeHtml(formatCurrency(itemDiscountTotal))}</td></tr>` : ''}
           ${saleDiscountAmount > 0 ? `<tr><td>Sleva na nákup</td><td class="text-right">-${escapeHtml(formatCurrency(saleDiscountAmount))}</td></tr>` : ''}
           <tr>
-            <td>Mezisoučet</td>
+            <td>Základ bez DPH</td>
+            <td class="text-right">${escapeHtml(formatCurrency(subtotalWithoutVat))}</td>
+          </tr>
+          ${vatRows}
+          <tr>
+            <td>Mezisoučet s DPH</td>
             <td class="text-right">${escapeHtml(formatCurrency(subtotal))}</td>
           </tr>
           ${tipAmount > 0 ? `<tr><td>Spropitné</td><td class="text-right">${escapeHtml(formatCurrency(tipAmount))}</td></tr>` : ''}
@@ -198,8 +208,8 @@ export function printTestDocument() {
     change: 51,
     total: 49,
     items: [
-      { name: 'Testovací položka', quantity: 1, unit: 'ks', price: 49 },
-      { name: 'Kontrola šířky papíru', quantity: 1, unit: 'ks', price: 0 },
+      { name: 'Testovací položka', quantity: 1, unit: 'ks', price: 49, priceWithVat: 49, priceWithoutVat: netFromGross(49, 12), vatRate: 12 },
+      { name: 'Kontrola šířky papíru', quantity: 1, unit: 'ks', price: 0, priceWithVat: 0, priceWithoutVat: 0, vatRate: 12 },
     ],
     note: 'Zkušební tisk zařízení',
   }, prefs));

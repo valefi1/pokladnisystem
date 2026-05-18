@@ -1,3 +1,5 @@
+import { netFromGross } from './vat';
+
 /**
  * Parsuje CSV export z Dotykačky (vzdálená správa → Produkty → Export)
  * Formát: categoryName;productId;name;vat;priceWithVAT
@@ -41,6 +43,8 @@ export function parseDotykackaCsv(fileContent) {
       name,
       category: (cols[idx('categoryName')] || '').trim() || 'Nezařazeno',
       price: priceWithVat,
+      priceWithVat,
+      priceWithoutVat: netFromGross(priceWithVat, vatRate),
       vatRate,
     });
   }

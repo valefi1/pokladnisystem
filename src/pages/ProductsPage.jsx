@@ -4,6 +4,7 @@ import { formatCurrency, formatDaysToZero, formatQuantity } from '../lib/format'
 import { parseStockMovementHistoryCsv, parseStockSnapshotCsv } from '../lib/csvImport';
 import { parseDotykackaCsv, readFileAsText } from '../lib/parseDotykackaCsv';
 import { getProductMeta, sortProductsForCatalog } from '../lib/catalogPresentation';
+import { netFromGross } from '../lib/vat';
 
 export function ProductsPage({ products, categories, analyticsMap, onAddProduct, onUpdateProduct, onImportStockSnapshot, onImportMovementHistory, onImportDotykackaCsv }) {
   const [search, setSearch] = useState('');
@@ -132,7 +133,9 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
                 <th>Název</th>
                 <th>Kategorie</th>
                 <th>Řada</th>
-                <th>Cena</th>
+                <th>Cena s DPH</th>
+                <th>Cena bez DPH</th>
+                <th>DPH</th>
                 <th>Nákupka</th>
                 <th>Sklad</th>
                 <th>Days to zero</th>
@@ -152,7 +155,9 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
                     </td>
                     <td><span className="category-chip" style={visual.style}>{product.category}</span></td>
                     <td><span className="badge family-badge" style={visual.style}>{visual.family}</span></td>
-                    <td>{formatCurrency(product.price)}</td>
+                    <td>{formatCurrency(product.priceWithVat ?? product.price)}</td>
+                    <td>{formatCurrency(product.priceWithoutVat || netFromGross(product.priceWithVat ?? product.price, product.vatRate))}</td>
+                    <td>{Number(product.vatRate) || 0} %</td>
                     <td>{formatCurrency(product.costPrice || 0)}</td>
                     <td>{formatQuantity(product.stock)} {product.unit}</td>
                     <td>{analytics?.daysToZero == null ? '—' : formatDaysToZero(analytics.daysToZero)}</td>

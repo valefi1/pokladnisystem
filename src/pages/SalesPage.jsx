@@ -460,7 +460,7 @@ export function SalesPage({ sales = [], dayClosures = [], cashSessions = [], act
                     for (const item of (s.items||[])) {
                       const r = Number(item.vatRate)||12;
                       const k = r===0?'0%':r===21?'21%':'12%';
-                      vat[k] = (vat[k]||0) + item.price*item.quantity;
+                      vat[k] = (vat[k]||0) + (Number(item.lineTotalWithoutVat) || netFromGross((Number(item.lineTotal) || Number(item.price) * Number(item.quantity)), r));
                     }
                   }
                   const totalBase = Object.values(vat).reduce((s,v)=>s+v,0);

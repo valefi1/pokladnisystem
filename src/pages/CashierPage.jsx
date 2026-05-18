@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PaymentDialog } from '../components/PaymentDialog';
 import { formatCurrency, formatQuantity } from '../lib/format';
 import { formatUnitLabel, getDefaultSaleQuantity, getQuantityStep, isWeightUnit, normalizeCartQuantity, sanitizePositiveQuantity } from '../lib/productUnits';
 import { printSaleDocument } from '../lib/receiptPrint';
 import { CashCountForm, getCashBreakdownTotal, normalizeCashBreakdown } from '../components/CashCountForm';
 import { getCategoryMeta, getProductMeta, sortCategories, sortProductsForCatalog } from '../lib/catalogPresentation';
+import { netFromGross, vatFromGross } from '../lib/vat';
 
 function createTicket(name = 'Účet 1') {
   const now = new Date().toISOString();
@@ -33,8 +34,10 @@ function createCartItem(product, quantity = getDefaultSaleQuantity(product.unit)
   return {
     productId: product.id,
     name: product.name,
-    price: Number(product.price) || 0,
-    originalPrice: Number(product.price) || 0,
+    price: Number(product.priceWithVat ?? product.price) || 0,
+    priceWithVat: Number(product.priceWithVat ?? product.price) || 0,
+    priceWithoutVat: Number(product.priceWithoutVat) || netFromGross(product.priceWithVat ?? product.price, product.vatRate),
+    originalPrice: Number(product.priceWithVat ?? product.price) || 0,
     unit: product.unit,
     category: product.category || '',
     vatRate: Number(product.vatRate) || 12,
@@ -91,13 +94,18 @@ function prepareSaleItems(items) {
     const lineDiscount = getLineDiscountAmount(item);
     return {
       ...item,
-      price: Number(item.price) || 0,
+      price: Number(item.priceWithVat ?? item.price) || 0,
+      priceWithVat: Number(item.priceWithVat ?? item.price) || 0,
+      priceWithoutVat: Number(item.priceWithoutVat) || netFromGross(item.priceWithVat ?? item.price, item.vatRate),
       quantity: Number(item.quantity) || 0,
       discountType: item.discountType || 'amount',
       discountValue: Number(item.discountValue) || 0,
       lineGross,
       lineDiscount,
       lineTotal: Math.max(0, lineGross - lineDiscount),
+      lineTotalWithVat: Math.max(0, lineGross - lineDiscount),
+      lineTotalWithoutVat: netFromGross(Math.max(0, lineGross - lineDiscount), item.vatRate),
+      lineVatAmount: vatFromGross(Math.max(0, lineGross - lineDiscount), item.vatRate),
     };
   });
 }
@@ -115,6 +123,20 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
   const [weightProduct, setWeightProduct] = useState(null);
   const [weightQuantity, setWeightQuantity] = useState('');
   const [editingItemId, setEditingItemId] = useState('');
+  const [productInfoProduct, setProductInfoProduct] = useState(null);
+  const longPressTimerRef = useRef(null);
+  const longPressProductIdRef = useRef('');
+  const pointerStartRef = useRef({ x: 0, y: 0 });
+  const longPressDidTriggerRef = useRef(false);
+
+  const clearProductPressTimer = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => clearProductPressTimer(), []);
 
   useEffect(() => {
     if (!tickets.length && onAddParkedTicket) {
@@ -203,6 +225,12 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
   const total = getTicketTotal(activeTicket);
   const totalDiscount = itemDiscountTotal + ticketDiscountAmount;
 
+  const getQuantityOnOpenTickets = (productId) => tickets.reduce((sum, ticket) => {
+    return sum + (ticket.items || []).reduce((ticketSum, item) => {
+      return item.productId === productId ? ticketSum + (Number(item.quantity) || 0) : ticketSum;
+    }, 0);
+  }, 0);
+
   const addProductWithQuantity = (product, quantity) => {
     updateActiveTicketItems((current) => {
       const existing = current.find((item) => item.productId === product.id);
@@ -225,6 +253,57 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
       return;
     }
     addProductWithQuantity(product, getDefaultSaleQuantity(product.unit));
+  };
+
+  const cancelProductPress = () => {
+    clearProductPressTimer();
+    longPressProductIdRef.current = '';
+    longPressDidTriggerRef.current = false;
+  };
+
+  const startProductPress = (product, event) => {
+    if (event?.button && event.button !== 0) return;
+    clearProductPressTimer();
+    longPressProductIdRef.current = product.id;
+    longPressDidTriggerRef.current = false;
+    pointerStartRef.current = { x: event?.clientX || 0, y: event?.clientY || 0 };
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressDidTriggerRef.current = true;
+      longPressProductIdRef.current = '';
+      setProductInfoProduct(product);
+    }, 650);
+  };
+
+  const moveProductPress = (event) => {
+    if (!longPressProductIdRef.current) return;
+    const dx = Math.abs((event?.clientX || 0) - pointerStartRef.current.x);
+    const dy = Math.abs((event?.clientY || 0) - pointerStartRef.current.y);
+    if (dx > 14 || dy > 14) cancelProductPress();
+  };
+
+  const finishProductPress = (product) => {
+    const shouldAdd = longPressProductIdRef.current === product.id && !longPressDidTriggerRef.current;
+    clearProductPressTimer();
+    longPressProductIdRef.current = '';
+    if (shouldAdd) addToCart(product);
+    window.setTimeout(() => { longPressDidTriggerRef.current = false; }, 0);
+  };
+
+  const openProductInfo = (product, event) => {
+    event?.preventDefault?.();
+    cancelProductPress();
+    setProductInfoProduct(product);
+  };
+
+  const addProductFromInfo = () => {
+    if (!productInfoProduct) return;
+    if (isWeightUnit(productInfoProduct.unit)) {
+      setWeightProduct(productInfoProduct);
+      setWeightQuantity('');
+    } else {
+      addProductWithQuantity(productInfoProduct, getDefaultSaleQuantity(productInfoProduct.unit));
+    }
+    setProductInfoProduct(null);
   };
 
   const confirmWeightProduct = () => {
@@ -473,15 +552,22 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               return (
                 <button
                   key={product.id}
-                  className={`product-tile semantic-tile high-contrast-tile ${(Number(product.stock) || 0) <= 0 ? 'warning-tile' : ''}`}
+                  className={`product-tile semantic-tile high-contrast-tile touch-product-tile ${(Number(product.stock) || 0) <= 0 ? 'warning-tile' : ''}`}
                   style={visual.style}
-                  onClick={() => addToCart(product)}
+                  onPointerDown={(event) => startProductPress(product, event)}
+                  onPointerMove={moveProductPress}
+                  onPointerUp={() => finishProductPress(product)}
+                  onPointerLeave={cancelProductPress}
+                  onPointerCancel={cancelProductPress}
+                  onContextMenu={(event) => openProductInfo(product, event)}
                 >
                   <span className="tile-category">{product.category}</span>
                   <strong>{product.name}</strong>
-                  <span className="tile-price">{formatCurrency(product.price)}</span>
-                  <small>{weighted ? 'na váhu · zadat kg' : 'kusový prodej'}</small>
-                  <small>Sklad {formatQuantity(product.stock)} {formatUnitLabel(product.unit)}</small>
+                  <span className="tile-price">{formatCurrency(product.priceWithVat ?? product.price)}</span>
+                  <span className="tile-bottom-row">
+                    <small className="tile-unit-badge">{weighted ? 'kg' : formatUnitLabel(product.unit)}</small>
+                    <small className="tile-info-hint">podržet ⓘ</small>
+                  </span>
                 </button>
               );
             })}
@@ -503,7 +589,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
                 <div key={item.productId} className="cart-row cart-item-row editable-cart-row" onClick={() => setEditingItemId(item.productId)} role="button" tabIndex="0">
                   <div>
                     <strong>{item.name}</strong>
-                    <p className="muted">{formatCurrency(item.price)} / {formatUnitLabel(item.unit)}</p>
+                    <p className="muted">{formatCurrency(item.priceWithVat ?? item.price)} s DPH / {formatUnitLabel(item.unit)}</p>
                     {lineDiscount > 0 ? <p className="discount-line">Sleva {formatCurrency(lineDiscount)}</p> : null}
                   </div>
                   <div className="cart-quantity-block" onClick={(event) => event.stopPropagation()}>
@@ -579,6 +665,59 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
         </aside>
       </div>
 
+      {productInfoProduct ? (
+        <div className="modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setProductInfoProduct(null); }}>
+          <div className="modal touch-modal product-info-sheet">
+            <div className="modal-header">
+              <div>
+                <h3>Detail produktu</h3>
+                <p className="muted">Podržení dlaždice zobrazí sklad a prodejní informace.</p>
+              </div>
+              <button className="ghost-button" onClick={() => setProductInfoProduct(null)}>✕</button>
+            </div>
+            <div className="product-info-hero">
+              <span className="tile-category">{productInfoProduct.category || 'Bez kategorie'}</span>
+              <h2>{productInfoProduct.name}</h2>
+              <strong>{formatCurrency(productInfoProduct.priceWithVat ?? productInfoProduct.price)} s DPH / {formatUnitLabel(productInfoProduct.unit)}</strong>
+            </div>
+            <div className="product-info-grid">
+              <div className="info-metric stock-metric">
+                <span>Sklad</span>
+                <strong>{formatQuantity(productInfoProduct.stock)} {formatUnitLabel(productInfoProduct.unit)}</strong>
+              </div>
+              <div className="info-metric">
+                <span>Na otevřených účtech</span>
+                <strong>{formatQuantity(getQuantityOnOpenTickets(productInfoProduct.id))} {formatUnitLabel(productInfoProduct.unit)}</strong>
+              </div>
+              <div className="info-metric">
+                <span>EAN</span>
+                <strong>{productInfoProduct.barcode || '—'}</strong>
+              </div>
+              <div className="info-metric">
+                <span>PLU</span>
+                <strong>{productInfoProduct.plu || '—'}</strong>
+              </div>
+              <div className="info-metric">
+                <span>Cena bez DPH</span>
+                <strong>{formatCurrency(productInfoProduct.priceWithoutVat || netFromGross(productInfoProduct.priceWithVat ?? productInfoProduct.price, productInfoProduct.vatRate))}</strong>
+              </div>
+              <div className="info-metric">
+                <span>DPH</span>
+                <strong>{Number(productInfoProduct.vatRate) || 0} % · {formatCurrency(vatFromGross(productInfoProduct.priceWithVat ?? productInfoProduct.price, productInfoProduct.vatRate))}</strong>
+              </div>
+              <div className="info-metric">
+                <span>Typ prodeje</span>
+                <strong>{isWeightUnit(productInfoProduct.unit) ? 'Na váhu' : 'Kusový'}</strong>
+              </div>
+            </div>
+            <div className="form-actions product-info-actions">
+              <button className="ghost-button" onClick={() => setProductInfoProduct(null)}>Zavřít</button>
+              <button className="primary-button touch-confirm-button" onClick={addProductFromInfo}>Přidat do účtu</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {weightProduct ? (
         <div className="modal-backdrop">
           <div className="modal touch-modal quantity-modal">
@@ -609,7 +748,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               </div>
               <div className="summary-box summary-box-inline">
                 <span>Cena</span>
-                <strong>{formatCurrency((Number(weightProduct.price) || 0) * sanitizePositiveQuantity(weightQuantity, weightProduct.unit))}</strong>
+                <strong>{formatCurrency((Number(weightProduct.priceWithVat ?? weightProduct.price) || 0) * sanitizePositiveQuantity(weightQuantity, weightProduct.unit))}</strong>
               </div>
               <div className="form-actions">
                 <button className="ghost-button" onClick={() => setWeightProduct(null)}>Zrušit</button>
@@ -635,8 +774,8 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
                 <label>Množství ({formatUnitLabel(editingItem.unit)})
                   <input type="number" min={isWeightUnit(editingItem.unit) ? '0.001' : '1'} step={getQuantityStep(editingItem.unit)} value={editingItem.quantity} onChange={(event) => updateCartItem(editingItem.productId, { quantity: normalizeCartQuantity(event.target.value, editingItem.unit) })} />
                 </label>
-                <label>Cena za jednotku
-                  <input type="number" min="0" step="0.01" value={editingItem.price} onChange={(event) => updateCartItem(editingItem.productId, { price: parseNumber(event.target.value) })} />
+                <label>Cena za jednotku s DPH
+                  <input type="number" min="0" step="0.01" value={editingItem.priceWithVat ?? editingItem.price} onChange={(event) => { const value = parseNumber(event.target.value); updateCartItem(editingItem.productId, { price: value, priceWithVat: value, priceWithoutVat: netFromGross(value, editingItem.vatRate) }); }} />
                 </label>
               </div>
               <div className="inner-card stack compact">

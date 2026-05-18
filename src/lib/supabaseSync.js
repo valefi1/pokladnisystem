@@ -1,5 +1,6 @@
 import { emptyState, normalizeState } from '../data/initialState';
 import { supabase, supabaseConfigured, getSupabaseUser } from './supabaseClient';
+import { netFromGross, normalizeProductVatPricing } from './vat';
 
 const SYNC_TABLES = {
   products: 'pos_products',
@@ -28,15 +29,19 @@ function jsonRow(userId, item) {
 }
 
 function productRow(userId, product) {
+  const normalized = normalizeProductVatPricing(product);
   return {
-    ...jsonRow(userId, product),
-    name: product.name || '',
-    category: product.category || '',
-    barcode: product.barcode || '',
-    plu: product.plu || '',
-    price: Number(product.price) || 0,
-    stock: Number(product.stock) || 0,
-    hidden: Boolean(product.hidden),
+    ...jsonRow(userId, normalized),
+    name: normalized.name || '',
+    category: normalized.category || '',
+    barcode: normalized.barcode || '',
+    plu: normalized.plu || '',
+    price: Number(normalized.priceWithVat ?? normalized.price) || 0,
+    price_with_vat: Number(normalized.priceWithVat ?? normalized.price) || 0,
+    price_without_vat: Number(normalized.priceWithoutVat) || netFromGross(normalized.priceWithVat ?? normalized.price, normalized.vatRate),
+    vat_rate: Number(normalized.vatRate) || 0,
+    stock: Number(normalized.stock) || 0,
+    hidden: Boolean(normalized.hidden),
   };
 }
 
@@ -47,6 +52,8 @@ function saleRow(userId, sale) {
     created_at: sale.createdAt || nowIso(),
     payment_method: sale.paymentMethod || '',
     total: Number(sale.total) || 0,
+    total_without_vat: Number(sale.subtotalWithoutVat) || 0,
+    vat_total: Number(sale.vatTotal) || 0,
     tip_amount: Number(sale.tipAmount) || 0,
     unpaid: Boolean(sale.unpaid),
   };
@@ -113,7 +120,7 @@ function cashSessionRow(userId, session) {
 
 
 function lineGross(item) {
-  return (Number(item.price) || 0) * (Number(item.quantity) || 0);
+  return (Number(item.priceWithVat ?? item.price) || 0) * (Number(item.quantity) || 0);
 }
 
 function lineDiscount(item) {

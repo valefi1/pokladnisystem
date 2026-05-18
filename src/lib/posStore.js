@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { loadState, resetState, saveState } from './storage';
 import { loadRemoteState, syncStateToSupabase, getSyncModeLabel } from './supabaseSync';
+import { buildVatBreakdown, netFromGross, normalizeProductVatPricing, roundMoney, vatFromGross } from './vat';
 
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,11 +34,11 @@ function mergeImportedProducts(existingProducts, incomingProducts) {
     usedKeys.add(key);
     const existing = existingByKey.get(key);
     if (!existing) {
-      return { ...product, analyticsKey: key };
+      return { ...normalizeProductVatPricing(product), analyticsKey: key };
     }
     return {
       ...existing,
-      ...product,
+      ...normalizeProductVatPricing(product),
       id: existing.id,
       hidden: existing.hidden ?? false,
       unit: product.unit || existing.unit || 'ks',
@@ -157,7 +158,7 @@ function reducer(state, action) {
       };
     }
     case 'ADD_PRODUCT': {
-      const product = { ...action.payload, id: uid('p') };
+      const product = normalizeProductVatPricing({ ...action.payload, id: uid('p') });
       return {
         ...state,
         products: [{ ...product, analyticsKey: getProductKey(product) }, ...state.products],
@@ -169,7 +170,7 @@ function reducer(state, action) {
         ...state,
         products: state.products.map((product) =>
           product.id === action.payload.id
-            ? { ...product, ...action.payload, analyticsKey: getProductKey({ ...product, ...action.payload }) }
+            ? { ...normalizeProductVatPricing({ ...product, ...action.payload }), analyticsKey: getProductKey({ ...product, ...action.payload }) }
             : product
         ),
         auditLog: [auditEntry('update', 'product', action.payload.id, action.payload.name || 'Úprava produktu', action.payload), ...state.auditLog],
@@ -206,25 +207,29 @@ function reducer(state, action) {
         );
         if (!incomingMatch) return p;
         usedIds.add(incomingMatch.dotykackaId);
-        return {
+        return normalizeProductVatPricing({
           ...p,
-          price: incomingMatch.price,
+          price: incomingMatch.priceWithVat ?? incomingMatch.price,
+          priceWithVat: incomingMatch.priceWithVat ?? incomingMatch.price,
+          priceWithoutVat: incomingMatch.priceWithoutVat,
           vatRate: incomingMatch.vatRate,
           category: incomingMatch.category || p.category,
           dotykackaId: incomingMatch.dotykackaId,
           // Zachová: stock, costPrice, barcode, plu, unit, hidden, note
-        };
+        });
       });
 
       // Přidej nové produkty (nenalezené v existujících)
       const newProducts = incoming
         .filter(i => !usedIds.has(i.dotykackaId) && !existingByName.has(normalizeText(i.name)))
-        .map(i => ({
+        .map(i => normalizeProductVatPricing({
           id: uid('p'),
           dotykackaId: i.dotykackaId,
           name: i.name,
           category: i.category,
-          price: i.price,
+          price: i.priceWithVat ?? i.price,
+          priceWithVat: i.priceWithVat ?? i.price,
+          priceWithoutVat: i.priceWithoutVat,
           vatRate: i.vatRate,
           costPrice: 0,
           stock: 0,
@@ -327,24 +332,34 @@ function reducer(state, action) {
       const lastToday = state.sales.filter((sale) => String(sale.documentNumber || '').startsWith(createdAt.slice(0, 10).replaceAll('-', ''))).length;
       const documentNumber = buildDocumentNumber(lastToday + 1, createdAt);
       const preparedItems = items.map((item) => {
-        const price = Number(item.price) || 0;
+        const priceWithVat = Number(item.priceWithVat ?? item.price) || 0;
+        const vatRate = Number(item.vatRate) || 12;
         const quantity = Number(item.quantity) || 0;
-        const lineGross = Number(item.lineGross) || price * quantity;
+        const priceWithoutVat = Number.isFinite(Number(item.priceWithoutVat)) ? Number(item.priceWithoutVat) : netFromGross(priceWithVat, vatRate);
+        const lineGross = Number(item.lineGross) || priceWithVat * quantity;
         const lineDiscount = Number(item.lineDiscount) || 0;
+        const lineTotal = Math.max(0, Number(item.lineTotal) || (lineGross - lineDiscount));
+        const lineTotalWithoutVat = netFromGross(lineTotal, vatRate);
+        const lineVatAmount = vatFromGross(lineTotal, vatRate);
         return {
           productId: item.productId,
           name: item.name,
-          price,
-          originalPrice: Number(item.originalPrice) || price,
+          price: priceWithVat,
+          priceWithVat,
+          priceWithoutVat,
+          originalPrice: Number(item.originalPrice) || priceWithVat,
           quantity,
           unit: item.unit,
           category: item.category || '',
-          vatRate: Number(item.vatRate) || 12,
+          vatRate,
           discountType: item.discountType || 'amount',
           discountValue: Number(item.discountValue) || 0,
           lineGross,
           lineDiscount,
-          lineTotal: Math.max(0, Number(item.lineTotal) || (lineGross - lineDiscount)),
+          lineTotal,
+          lineTotalWithVat: lineTotal,
+          lineTotalWithoutVat,
+          lineVatAmount,
         };
       });
       const computedGrossSubtotal = preparedItems.reduce((sum, item) => sum + item.lineGross, 0);
@@ -353,6 +368,9 @@ function reducer(state, action) {
       const itemDiscount = Number(itemDiscountTotal) || computedItemDiscount;
       const saleDiscount = Number(saleDiscountAmount) || 0;
       const subtotal = Math.max(0, gross - itemDiscount - saleDiscount);
+      const vatBreakdown = buildVatBreakdown(preparedItems, saleDiscount);
+      const subtotalWithoutVat = roundMoney(vatBreakdown.reduce((sum, row) => sum + row.base, 0));
+      const vatTotal = roundMoney(vatBreakdown.reduce((sum, row) => sum + row.vat, 0));
       const tip = Number(tipAmount) || 0;
       const rounding = Number(roundingAmount) || 0;
       const total = Number.isFinite(Number(payableTotal)) ? Number(payableTotal) : Math.max(0, subtotal + tip + rounding);
@@ -400,6 +418,9 @@ function reducer(state, action) {
         itemDiscountTotal: itemDiscount,
         saleDiscountAmount: saleDiscount,
         subtotal,
+        subtotalWithoutVat,
+        vatTotal,
+        vatBreakdown,
         total,
         tipAmount: tip,
         roundingAmount: rounding,
@@ -826,7 +847,7 @@ export function usePosStore() {
       for (const item of (s.items||[])) {
         const vat = Number(item.vatRate) || 12;
         const key = vat === 0 ? '0%' : vat === 21 ? '21%' : '12%';
-        vatBreakdown[key] = (vatBreakdown[key]||0) + item.price * item.quantity;
+        vatBreakdown[key] = (vatBreakdown[key]||0) + (Number(item.lineTotalWithoutVat) || netFromGross((Number(item.lineTotal) || Number(item.price) * Number(item.quantity)), vat));
       }
     }
 

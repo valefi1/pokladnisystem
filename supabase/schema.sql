@@ -11,6 +11,9 @@ create table if not exists public.pos_products (
   barcode text not null default '',
   plu text not null default '',
   price numeric not null default 0,
+  price_with_vat numeric not null default 0,
+  price_without_vat numeric not null default 0,
+  vat_rate numeric not null default 12,
   stock numeric not null default 0,
   hidden boolean not null default false,
   payload jsonb not null default '{}'::jsonb,
@@ -25,6 +28,8 @@ create table if not exists public.pos_sales (
   created_at timestamptz not null default now(),
   payment_method text not null default '',
   total numeric not null default 0,
+  total_without_vat numeric not null default 0,
+  vat_total numeric not null default 0,
   tip_amount numeric not null default 0,
   unpaid boolean not null default false,
   payload jsonb not null default '{}'::jsonb,
@@ -126,6 +131,19 @@ create table if not exists public.pos_cash_sessions (
   primary key (owner_id, id)
 );
 
+
+
+alter table public.pos_products add column if not exists price_with_vat numeric not null default 0;
+alter table public.pos_products add column if not exists price_without_vat numeric not null default 0;
+alter table public.pos_products add column if not exists vat_rate numeric not null default 12;
+alter table public.pos_sales add column if not exists total_without_vat numeric not null default 0;
+alter table public.pos_sales add column if not exists vat_total numeric not null default 0;
+update public.pos_products
+set price_with_vat = price
+where coalesce(price_with_vat, 0) = 0 and coalesce(price, 0) <> 0;
+update public.pos_products
+set price_without_vat = round((price_with_vat / (1 + vat_rate / 100.0))::numeric, 2)
+where coalesce(price_without_vat, 0) = 0 and coalesce(price_with_vat, 0) <> 0;
 
 alter table public.pos_cash_sessions add column if not exists opening_cash_breakdown jsonb not null default '{}'::jsonb;
 alter table public.pos_cash_sessions add column if not exists expected_opening_cash numeric;

@@ -1,4 +1,5 @@
 import { inferUnitFromQuantity } from './productUnits';
+import { grossFromNet, netFromGross } from './vat';
 
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -60,11 +61,19 @@ export function parseStockSnapshotCsv(text) {
   const rows = parseDotyCsv(text);
   return rows.map((row) => {
     const stock = parseNumber(row['Množství na skladu']);
+    const vatRate = parseNumber(row['DPH'] || row['Sazba DPH']) || 12;
+    const explicitGross = row['Prodejní cena s DPH'] || row['Cena s DPH'] || row['priceWithVAT'];
+    const explicitNet = row['Prodejní cena bez DPH'] || row['Cena bez DPH'];
+    const priceWithVat = explicitGross ? parseNumber(explicitGross) : grossFromNet(parseNumber(explicitNet), vatRate);
+    const priceWithoutVat = explicitNet ? parseNumber(explicitNet) : netFromGross(priceWithVat, vatRate);
     return ({
     id: uid('p'),
     name: row['Produkt'] || 'Bez názvu',
     category: row['Kategorie'] || 'Nezařazeno',
-    price: parseNumber(row['Prodejní cena bez DPH']),
+    price: priceWithVat,
+    priceWithVat,
+    priceWithoutVat,
+    vatRate,
     costPrice: parseNumber(row['Jednotková NC bez DPH']),
     stock,
     unit: inferUnitFromQuantity(stock),
