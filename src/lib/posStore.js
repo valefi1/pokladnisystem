@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { loadState, resetState, saveState } from './storage';
-import { loadRemoteState, syncStateToSupabase, syncProductPresentationToSupabase, syncProductsToSupabase, upsertImportedProductsToSupabase, getSyncModeLabel } from './supabaseSync';
+import { loadRemoteState, syncStateToSupabase, syncProductPresentationToSupabase, upsertImportedProductsToSupabase, getSyncModeLabel } from './supabaseSync';
 import { supabaseConfigured } from './supabaseClient';
 import { buildVatBreakdown, netFromGross, normalizeProductVatPricing, roundMoney, vatFromGross } from './vat';
 
@@ -817,17 +817,20 @@ export function usePosStore() {
       setSyncStatus({ mode: getSyncModeLabel(), state: 'syncing', message: 'Zapisuji importované produkty přímo do Supabase…' });
 
       if (action.type === 'IMPORT_STOCK_SNAPSHOT' || action.type === 'IMPORT_DOTYKACKA_CSV') {
-        // Critical: write the imported rows directly to pos_products and verify them
-        // before any later pull from Supabase can replace the local import with old DB values.
+        // Critical path for product imports: write only the imported product rows directly
+        // to pos_products and verify them. Do NOT follow this with a full-state product
+        // sync, because stale local/cache product objects can overwrite the fresh import.
         const directImportResult = await upsertImportedProductsToSupabase(action.payload.products || [], baseState.products || []);
         if (directImportResult?.skipped) {
           throw new Error('Supabase není nastavená, import se nezapsal do databáze.');
         }
 
-        const resultProducts = await syncProductsToSupabase(nextState.products || []);
-        if (resultProducts?.skipped) {
-          throw new Error('Supabase není nastavená, import se nezapsal do databáze.');
-        }
+        fullDirtyRef.current = false;
+        presentationDirtyProductIdsRef.current.clear();
+        pendingLocalWriteRef.current = false;
+        lastLocalChangeAtRef.current = Date.now();
+        setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: `Import je zapsaný v Supabase (${directImportResult.updated || 0} produktů).` });
+        return directImportResult;
       }
 
       const result = await syncStateToSupabase(nextState);

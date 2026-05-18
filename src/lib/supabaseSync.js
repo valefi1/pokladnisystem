@@ -338,10 +338,26 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
+function cleanCode(value) {
+  return String(value || '').trim();
+}
+
+function getImportMatchKeys(productLike = {}) {
+  const keys = [];
+  const barcode = cleanCode(productLike.barcode);
+  const plu = cleanCode(productLike.plu);
+  const name = normalizeText(productLike.name);
+  const category = normalizeText(productLike.category);
+
+  if (barcode) keys.push(`barcode:${barcode}`);
+  if (plu) keys.push(`plu:${plu}`);
+  if (name && category) keys.push(`namecat:${name}|${category}`);
+  if (name) keys.push(`name:${name}`);
+  return keys;
+}
+
 function getImportMatchKey(productLike = {}) {
-  if (productLike.barcode) return `barcode:${String(productLike.barcode).trim()}`;
-  if (productLike.plu) return `plu:${String(productLike.plu).trim()}`;
-  return `name:${normalizeText(productLike.name)}|cat:${normalizeText(productLike.category)}`;
+  return getImportMatchKeys(productLike)[0] || `name:${normalizeText(productLike.name)}|cat:${normalizeText(productLike.category)}`;
 }
 
 function numbersClose(a, b, tolerance = 0.01) {
@@ -486,7 +502,7 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
   if (!supabaseConfigured || !supabase) return { skipped: true };
   const userId = await getUserIdOrThrow();
   const incoming = (importedProducts || []).filter((item) => item?.name || item?.barcode || item?.plu);
-  if (!incoming.length) return { ok: true, updated: 0 };
+  if (!incoming.length) return { ok: true, updated: 0, inserted: 0, matched: 0, verified: 0 };
 
   const { data: remoteRows, error: readError } = await supabase
     .from(SYNC_TABLES.products)
@@ -495,29 +511,73 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
   if (readError) throw readError;
 
   const remoteProducts = (remoteRows || []).map(productFromRow);
-  const existingByKey = new Map();
-  for (const product of [...remoteProducts, ...(localProducts || [])]) {
-    if (!product) continue;
-    existingByKey.set(getImportMatchKey(product), product);
+  const remoteById = new Map(remoteProducts.map((product) => [String(product.id), product]));
+  const remoteMatches = new Map();
+  for (const product of remoteProducts) {
+    for (const key of getImportMatchKeys(product)) {
+      if (!remoteMatches.has(key)) remoteMatches.set(key, []);
+      remoteMatches.get(key).push(product);
+    }
   }
 
-  const rows = incoming.map((raw) => {
-    const normalizedIncoming = normalizeProductVatPricing(raw);
-    const key = getImportMatchKey(normalizedIncoming);
-    const existing = existingByKey.get(key) || null;
-    const merged = normalizeProductVatPricing({
-      ...(existing || {}),
-      ...normalizedIncoming,
-      id: existing?.id || normalizedIncoming.id || `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      hidden: existing?.hidden ?? normalizedIncoming.hidden ?? false,
-      displayOrder: existing?.displayOrder ?? normalizedIncoming.displayOrder,
-      tileColor: existing?.tileColor ?? normalizedIncoming.tileColor,
-      colorKey: existing?.colorKey ?? normalizedIncoming.colorKey,
-      importedAt: new Date().toISOString(),
-    });
-    return productRow(userId, merged);
-  });
+  const localMatches = new Map();
+  for (const product of localProducts || []) {
+    for (const key of getImportMatchKeys(product)) {
+      if (!localMatches.has(key)) localMatches.set(key, []);
+      localMatches.get(key).push(product);
+    }
+  }
 
+  const rowsById = new Map();
+  const report = { inserted: 0, matched: 0, updated: 0, verified: 0, duplicatesUpdated: 0, examples: [] };
+
+  for (const raw of incoming) {
+    const normalizedIncoming = normalizeProductVatPricing(raw);
+    const keys = getImportMatchKeys(normalizedIncoming);
+    const remoteCandidates = [];
+    for (const key of keys) {
+      for (const candidate of remoteMatches.get(key) || []) {
+        if (!remoteCandidates.some((item) => String(item.id) === String(candidate.id))) remoteCandidates.push(candidate);
+      }
+    }
+
+    // If Supabase has matching rows, update every matching row. This handles older duplicate rows
+    // created by prior imports, so whichever row the app loads after refresh gets the imported values.
+    const targets = remoteCandidates.length ? remoteCandidates : (() => {
+      const localCandidates = [];
+      for (const key of keys) {
+        for (const candidate of localMatches.get(key) || []) {
+          if (!localCandidates.some((item) => String(item.id) === String(candidate.id))) localCandidates.push(candidate);
+        }
+      }
+      return localCandidates.length ? [localCandidates[0]] : [null];
+    })();
+
+    if (remoteCandidates.length) report.matched += 1;
+    if (remoteCandidates.length > 1) report.duplicatesUpdated += remoteCandidates.length - 1;
+    if (!remoteCandidates.length) report.inserted += 1;
+
+    for (const existing of targets) {
+      const existingRemote = existing?.id ? remoteById.get(String(existing.id)) || existing : null;
+      const merged = normalizeProductVatPricing({
+        ...(existingRemote || existing || {}),
+        ...normalizedIncoming,
+        id: existing?.id || normalizedIncoming.id || `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        hidden: existing?.hidden ?? normalizedIncoming.hidden ?? false,
+        displayOrder: existing?.displayOrder ?? normalizedIncoming.displayOrder,
+        tileColor: existing?.tileColor ?? normalizedIncoming.tileColor,
+        colorKey: existing?.colorKey ?? normalizedIncoming.colorKey,
+        importedAt: new Date().toISOString(),
+      });
+      rowsById.set(String(merged.id), productRow(userId, merged));
+    }
+
+    if (report.examples.length < 8) {
+      report.examples.push(`${normalizedIncoming.name || normalizedIncoming.barcode || normalizedIncoming.plu}: ${normalizedIncoming.priceWithVat ?? normalizedIncoming.price} Kč, DPH ${normalizedIncoming.vatRate ?? 0} %, sklad ${normalizedIncoming.stock ?? 0}`);
+    }
+  }
+
+  const rows = [...rowsById.values()];
   const { error: upsertError } = await supabase
     .from(SYNC_TABLES.products)
     .upsert(rows, { onConflict: 'owner_id,id' });
@@ -548,7 +608,9 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
     throw new Error(`Import se nepodařilo ověřit v Supabase. ${mismatches.slice(0, 3).join(' | ')}`);
   }
 
-  return { ok: true, updated: rows.length };
+  report.updated = rows.length;
+  report.verified = writtenRows?.length || 0;
+  return { ok: true, ...report };
 }
 
 export async function syncProductsToSupabase(products = []) {

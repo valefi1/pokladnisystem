@@ -76,8 +76,9 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
       setImportMessage('Načítám import a zapisuji ho do Supabase…');
       const text = await file.text();
       const importedProducts = parseStockSnapshotCsv(text);
-      await onImportStockSnapshot(importedProducts, file.name);
-      setImportMessage(`Naimportován snapshot skladu: ${importedProducts.length} položek ze souboru ${file.name}. Změny jsou zapsané do Supabase.`);
+      const result = await onImportStockSnapshot(importedProducts, file.name);
+      const examples = result?.examples?.length ? `\nUkázky: ${result.examples.join(' | ')}` : '';
+      setImportMessage(`Import stavu skladu dokončen: ${importedProducts.length} řádků CSV. Zapsáno/ověřeno v Supabase: ${result?.updated ?? importedProducts.length}/${result?.verified ?? importedProducts.length}. Nové: ${result?.inserted ?? 0}, nalezené: ${result?.matched ?? 0}, opravené duplicity: ${result?.duplicatesUpdated ?? 0}.${examples}`);
     } catch (error) {
       setImportMessage(`Chyba importu: ${error.message || 'nepodařilo se zapsat import do Supabase'}`);
     } finally {
