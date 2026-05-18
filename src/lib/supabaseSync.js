@@ -19,6 +19,34 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function formatSupabaseError(error, context = 'Supabase požadavek selhal') {
+  if (!error) return context;
+  const parts = [context];
+  if (error.message) parts.push(`message: ${error.message}`);
+  if (error.code) parts.push(`code: ${error.code}`);
+  if (error.details) parts.push(`details: ${error.details}`);
+  if (error.hint) parts.push(`hint: ${error.hint}`);
+  if (error.status) parts.push(`status: ${error.status}`);
+  return parts.join(' | ');
+}
+
+function throwSupabaseError(error, context) {
+  if (error) throw new Error(formatSupabaseError(error, context));
+}
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function cleanPayload(value) {
+  return JSON.parse(JSON.stringify(value || {}, (_key, item) => {
+    if (typeof item === 'number' && !Number.isFinite(item)) return 0;
+    if (typeof item === 'undefined') return null;
+    return item;
+  }));
+}
+
 function jsonRow(userId, item) {
   return {
     id: String(item.id),
@@ -30,18 +58,35 @@ function jsonRow(userId, item) {
 
 function productRow(userId, product) {
   const normalized = normalizeProductVatPricing(product);
+  const priceWithVat = finiteNumber(normalized.priceWithVat ?? normalized.price, 0);
+  const vatRate = finiteNumber(normalized.vatRate, 0);
+  const priceWithoutVat = finiteNumber(normalized.priceWithoutVat, netFromGross(priceWithVat, vatRate));
+  const payload = cleanPayload({
+    ...normalized,
+    price: priceWithVat,
+    priceWithVat,
+    priceWithoutVat,
+    vatRate,
+  });
+
+  // IMPORTANT: keep this row aligned with the real public.pos_products columns only.
+  // Current columns: owner_id,id,name,category,barcode,plu,price,stock,hidden,payload,updated_at,
+  // price_with_vat,price_without_vat,vat_rate. Sending any extra DB column causes PostgREST 400.
   return {
-    ...jsonRow(userId, normalized),
-    name: normalized.name || '',
-    category: normalized.category || '',
-    barcode: normalized.barcode || '',
-    plu: normalized.plu || '',
-    price: Number(normalized.priceWithVat ?? normalized.price) || 0,
-    price_with_vat: Number(normalized.priceWithVat ?? normalized.price) || 0,
-    price_without_vat: Number(normalized.priceWithoutVat) || netFromGross(normalized.priceWithVat ?? normalized.price, normalized.vatRate),
-    vat_rate: Number(normalized.vatRate) || 0,
-    stock: Number(normalized.stock) || 0,
+    owner_id: userId,
+    id: String(normalized.id),
+    name: String(normalized.name || ''),
+    category: String(normalized.category || ''),
+    barcode: String(normalized.barcode || ''),
+    plu: String(normalized.plu || ''),
+    price: priceWithVat,
+    stock: finiteNumber(normalized.stock, 0),
     hidden: Boolean(normalized.hidden),
+    payload,
+    updated_at: nowIso(),
+    price_with_vat: priceWithVat,
+    price_without_vat: priceWithoutVat,
+    vat_rate: vatRate,
   };
 }
 
@@ -469,7 +514,7 @@ export async function syncProductPresentationToSupabase(state, productIds = []) 
     .select('*')
     .eq('owner_id', userId)
     .in('id', ids);
-  if (error) throw error;
+  throwSupabaseError(error, 'Nepodařilo se načíst vybrané produkty pro uložení pořadí/barvy.');
 
   const remoteById = new Map((data || []).map((row) => [String(row.id), row]));
   const rows = ids.map((id) => {
@@ -492,7 +537,7 @@ export async function syncProductPresentationToSupabase(state, productIds = []) 
 
   if (!rows.length) return { ok: true, updated: 0 };
   const { error: upsertError } = await supabase.from(SYNC_TABLES.products).upsert(rows, { onConflict: 'owner_id,id' });
-  if (upsertError) throw upsertError;
+  throwSupabaseError(upsertError, 'Nepodařilo se uložit pořadí/barvu produktu do Supabase.');
   return { ok: true, updated: rows.length };
 }
 
@@ -508,7 +553,7 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
     .from(SYNC_TABLES.products)
     .select('*')
     .eq('owner_id', userId);
-  if (readError) throw readError;
+  throwSupabaseError(readError, 'Import stavu skladu: nepodařilo se načíst existující produkty ze Supabase.');
 
   const remoteProducts = (remoteRows || []).map(productFromRow);
   const remoteById = new Map(remoteProducts.map((product) => [String(product.id), product]));
@@ -581,7 +626,7 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
   const { error: upsertError } = await supabase
     .from(SYNC_TABLES.products)
     .upsert(rows, { onConflict: 'owner_id,id' });
-  if (upsertError) throw upsertError;
+  throwSupabaseError(upsertError, `Import stavu skladu: Supabase odmítla zápis ${rows.length} produktů do pos_products. Ověř sloupce a RLS policies.`);
 
   const ids = rows.map((row) => row.id);
   const { data: writtenRows, error: verifyError } = await supabase
@@ -589,7 +634,7 @@ export async function upsertImportedProductsToSupabase(importedProducts = [], lo
     .select('*')
     .eq('owner_id', userId)
     .in('id', ids);
-  if (verifyError) throw verifyError;
+  throwSupabaseError(verifyError, 'Import stavu skladu: zápis proběhl, ale nepodařilo se znovu načíst uložené produkty ze Supabase.');
 
   const writtenById = new Map((writtenRows || []).map((row) => [String(row.id), row]));
   const mismatches = [];
