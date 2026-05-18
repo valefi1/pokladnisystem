@@ -196,6 +196,16 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
         </div>
       )}
 
+      {importMessage ? (
+        <div className={`card ${importMessage.startsWith('Chyba') ? 'danger-card' : 'info-card'}`} style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'1rem'}}>
+          <div style={{whiteSpace:'pre-wrap'}}>
+            <strong>{importMessage.startsWith('Chyba') ? 'Import stavu skladu selhal' : 'Import stavu skladu'}</strong><br/>
+            <span>{importMessage}</span>
+          </div>
+          <button className="ghost-button small-btn" onClick={() => setImportMessage('')}>✕</button>
+        </div>
+      ) : null}
+
       <section className="card">
         <div className="toolbar space-between product-filter-toolbar">
           <input className="search-input" placeholder="Hledat název, barkód nebo PLU" value={search} onChange={(e) => setSearch(e.target.value)} />
