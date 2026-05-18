@@ -761,6 +761,18 @@ export function usePosStore() {
   const [remoteLoadOk, setRemoteLoadOk] = useState(!supabaseConfigured);
   const remoteLoadedRef = useRef(false);
   const remoteLoadSucceededRef = useRef(false);
+  const pendingLocalWriteRef = useRef(false);
+  const lastLocalChangeAtRef = useRef(0);
+
+  const markLocalChange = () => {
+    pendingLocalWriteRef.current = true;
+    lastLocalChangeAtRef.current = Date.now();
+  };
+
+  const dispatchLocal = (action) => {
+    markLocalChange();
+    dispatch(action);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -789,8 +801,15 @@ export function usePosStore() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) return;
+      if (pendingLocalWriteRef.current) return;
+
+      const requestedAt = Date.now();
       loadRemoteState()
         .then((remoteState) => {
+          // Do not let a remote read that started before a local import/edit overwrite
+          // the fresh local state. The next successful sync makes Supabase current and
+          // then remote polling can resume safely.
+          if (pendingLocalWriteRef.current || requestedAt < lastLocalChangeAtRef.current) return;
           if (remoteState) {
             dispatch({ type: 'HYDRATE_REMOTE', payload: remoteState });
             setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Načteno ze Supabase.' });
@@ -815,6 +834,7 @@ export function usePosStore() {
             setSyncStatus({ mode: getSyncModeLabel(), state: 'local', message: 'Ukládám lokálně. Supabase není nastavený.' });
             return;
           }
+          pendingLocalWriteRef.current = false;
           setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Synchronizováno se Supabase.' });
         })
         .catch((error) => {
@@ -914,25 +934,25 @@ export function usePosStore() {
     syncStatus,
     remoteReady,
     remoteLoadOk,
-    addProduct: (payload) => dispatch({ type: 'ADD_PRODUCT', payload }),
-    updateProduct: (payload) => dispatch({ type: 'UPDATE_PRODUCT', payload }),
-    importStockSnapshot: (products, fileName) => dispatch({ type: 'IMPORT_STOCK_SNAPSHOT', payload: { products, fileName } }),
-    importDotykackaCsv: (products, fileName) => dispatch({ type: 'IMPORT_DOTYKACKA_CSV', payload: { products, fileName } }),
-    importMovementHistory: (rows, fileName) => dispatch({ type: 'IMPORT_MOVEMENT_HISTORY', payload: { rows, fileName } }),
-    applyStockMovement: (payload) => dispatch({ type: 'APPLY_STOCK_MOVEMENT', payload }),
-    completeSale: (payload) => dispatch({ type: 'COMPLETE_SALE', payload }),
-    addSupplier: (payload) => dispatch({ type: 'ADD_SUPPLIER', payload }),
-    updateSupplier: (payload) => dispatch({ type: 'UPDATE_SUPPLIER', payload }),
-    saveStockReceiptDraft: (payload) => dispatch({ type: 'SAVE_STOCK_RECEIPT_DRAFT', payload }),
-    clearStockReceiptDraft: () => dispatch({ type: 'CLEAR_STOCK_RECEIPT_DRAFT' }),
-    completeStockReceipt: (payload) => dispatch({ type: 'COMPLETE_STOCK_RECEIPT', payload }),
-    openCashRegister: (payload) => dispatch({ type: 'OPEN_CASH_REGISTER', payload }),
-    closeCashRegister: (payload) => dispatch({ type: 'CLOSE_CASH_REGISTER', payload }),
-    closeDay: (payload) => dispatch({ type: 'CLOSE_DAY', payload }),
-    addParkedTicket: (payload) => dispatch({ type: 'ADD_PARKED_TICKET', payload }),
-    renameParkedTicket: (id, name) => dispatch({ type: 'RENAME_PARKED_TICKET', payload: { id, name } }),
-    updateParkedTicketItems: (id, items, meta = {}) => dispatch({ type: 'UPDATE_PARKED_TICKET_ITEMS', payload: { id, items, meta } }),
-    deleteParkedTicket: (id) => dispatch({ type: 'DELETE_PARKED_TICKET', payload: { id } }),
-    resetDemo: () => dispatch({ type: 'RESET_DEMO' }),
+    addProduct: (payload) => dispatchLocal({ type: 'ADD_PRODUCT', payload }),
+    updateProduct: (payload) => dispatchLocal({ type: 'UPDATE_PRODUCT', payload }),
+    importStockSnapshot: (products, fileName) => dispatchLocal({ type: 'IMPORT_STOCK_SNAPSHOT', payload: { products, fileName } }),
+    importDotykackaCsv: (products, fileName) => dispatchLocal({ type: 'IMPORT_DOTYKACKA_CSV', payload: { products, fileName } }),
+    importMovementHistory: (rows, fileName) => dispatchLocal({ type: 'IMPORT_MOVEMENT_HISTORY', payload: { rows, fileName } }),
+    applyStockMovement: (payload) => dispatchLocal({ type: 'APPLY_STOCK_MOVEMENT', payload }),
+    completeSale: (payload) => dispatchLocal({ type: 'COMPLETE_SALE', payload }),
+    addSupplier: (payload) => dispatchLocal({ type: 'ADD_SUPPLIER', payload }),
+    updateSupplier: (payload) => dispatchLocal({ type: 'UPDATE_SUPPLIER', payload }),
+    saveStockReceiptDraft: (payload) => dispatchLocal({ type: 'SAVE_STOCK_RECEIPT_DRAFT', payload }),
+    clearStockReceiptDraft: () => dispatchLocal({ type: 'CLEAR_STOCK_RECEIPT_DRAFT' }),
+    completeStockReceipt: (payload) => dispatchLocal({ type: 'COMPLETE_STOCK_RECEIPT', payload }),
+    openCashRegister: (payload) => dispatchLocal({ type: 'OPEN_CASH_REGISTER', payload }),
+    closeCashRegister: (payload) => dispatchLocal({ type: 'CLOSE_CASH_REGISTER', payload }),
+    closeDay: (payload) => dispatchLocal({ type: 'CLOSE_DAY', payload }),
+    addParkedTicket: (payload) => dispatchLocal({ type: 'ADD_PARKED_TICKET', payload }),
+    renameParkedTicket: (id, name) => dispatchLocal({ type: 'RENAME_PARKED_TICKET', payload: { id, name } }),
+    updateParkedTicketItems: (id, items, meta = {}) => dispatchLocal({ type: 'UPDATE_PARKED_TICKET_ITEMS', payload: { id, items, meta } }),
+    deleteParkedTicket: (id) => dispatchLocal({ type: 'DELETE_PARKED_TICKET', payload: { id } }),
+    resetDemo: () => dispatchLocal({ type: 'RESET_DEMO' }),
   };
 }

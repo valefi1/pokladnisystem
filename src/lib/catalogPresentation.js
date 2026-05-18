@@ -80,16 +80,34 @@ export function sortCategories(categories = []) {
   return categories.includes('Vše') ? ['Vše', ...sorted] : sorted;
 }
 
+function hasManualOrder(product) {
+  return Number.isFinite(Number(product?.displayOrder));
+}
+
+function compareWithinCategory(a, b) {
+  const aManual = hasManualOrder(a);
+  const bManual = hasManualOrder(b);
+  if (aManual || bManual) {
+    const orderDiff = (aManual ? Number(a.displayOrder) : Number.MAX_SAFE_INTEGER) - (bManual ? Number(b.displayOrder) : Number.MAX_SAFE_INTEGER);
+    if (orderDiff !== 0) return orderDiff;
+  }
+  const familyCompare = getFamilyKey(a).localeCompare(getFamilyKey(b), 'cs');
+  if (familyCompare !== 0) return familyCompare;
+  const variantCompare = getVariantKey(a).localeCompare(getVariantKey(b), 'cs');
+  if (variantCompare !== 0) return variantCompare;
+  return String(a.name || '').localeCompare(String(b.name || ''), 'cs');
+}
+
 export function sortProductsForCatalog(products = []) {
   return [...products].sort((a, b) => {
     const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), 'cs');
     if (categoryCompare !== 0) return categoryCompare;
-    const familyCompare = getFamilyKey(a).localeCompare(getFamilyKey(b), 'cs');
-    if (familyCompare !== 0) return familyCompare;
-    const variantCompare = getVariantKey(a).localeCompare(getVariantKey(b), 'cs');
-    if (variantCompare !== 0) return variantCompare;
-    return String(a.name || '').localeCompare(String(b.name || ''), 'cs');
+    return compareWithinCategory(a, b);
   });
+}
+
+export function sortProductsWithinCategory(products = []) {
+  return [...products].sort(compareWithinCategory);
 }
 
 export function buildVisualStyle(entity, index = 0) {

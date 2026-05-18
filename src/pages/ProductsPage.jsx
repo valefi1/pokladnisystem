@@ -3,11 +3,13 @@ import { ProductFormModal } from '../components/ProductFormModal';
 import { formatCurrency, formatDaysToZero, formatQuantity } from '../lib/format';
 import { parseStockMovementHistoryCsv, parseStockSnapshotCsv } from '../lib/csvImport';
 import { parseDotykackaCsv, readFileAsText } from '../lib/parseDotykackaCsv';
-import { getProductMeta, sortProductsForCatalog } from '../lib/catalogPresentation';
+import { getProductMeta, sortProductsForCatalog, sortProductsWithinCategory } from '../lib/catalogPresentation';
 import { netFromGross } from '../lib/vat';
 
 export function ProductsPage({ products, categories, analyticsMap, onAddProduct, onUpdateProduct, onImportStockSnapshot, onImportMovementHistory, onImportDotykackaCsv }) {
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Vše');
+  const [orderCategory, setOrderCategory] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [importMessage, setImportMessage] = useState('');
@@ -16,10 +18,23 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
   const dotykackaInputRef = useRef(null);
   const [importResult, setImportResult] = useState(null); // {updated, added, fileName}
 
+  const categoryOptions = useMemo(() => categories.filter((category) => category && category !== 'Vše'), [categories]);
+
+  const activeOrderCategory = orderCategory || categoryOptions[0] || '';
+
   const filtered = useMemo(() => {
     const query = search.toLowerCase();
-    return sortProductsForCatalog(products).filter((product) => `${product.name} ${product.category} ${product.barcode} ${product.plu}`.toLowerCase().includes(query));
-  }, [products, search]);
+    return sortProductsForCatalog(products).filter((product) => {
+      const matchesSearch = `${product.name} ${product.category} ${product.barcode} ${product.plu}`.toLowerCase().includes(query);
+      const matchesCategory = selectedCategory === 'Vše' || product.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, search, selectedCategory]);
+
+  const orderedCategoryProducts = useMemo(() => {
+    if (!activeOrderCategory) return [];
+    return sortProductsWithinCategory(products.filter((product) => product.category === activeOrderCategory && !product.hidden));
+  }, [activeOrderCategory, products]);
 
   const productVisuals = useMemo(() => {
     const groupCounts = new Map();
@@ -88,6 +103,26 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
     event.target.value = '';
   };
 
+  const saveManualOrder = (nextOrderedProducts) => {
+    nextOrderedProducts.forEach((product, index) => {
+      const nextOrder = index + 1;
+      if (Number(product.displayOrder) !== nextOrder) {
+        onUpdateProduct({ ...product, displayOrder: nextOrder });
+      }
+    });
+  };
+
+  const moveProductInCategory = (productId, direction) => {
+    const currentIndex = orderedCategoryProducts.findIndex((product) => product.id === productId);
+    if (currentIndex < 0) return;
+    const targetIndex = direction === 'first' ? 0 : currentIndex + direction;
+    if (targetIndex < 0 || targetIndex >= orderedCategoryProducts.length || targetIndex === currentIndex) return;
+    const next = [...orderedCategoryProducts];
+    const [item] = next.splice(currentIndex, 1);
+    next.splice(targetIndex, 0, item);
+    saveManualOrder(next);
+  };
+
   return (
     <div className="page-stack">
       <section className="page-header">
@@ -122,9 +157,48 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
       )}
 
       <section className="card">
-        <div className="toolbar space-between">
+        <div className="toolbar space-between product-filter-toolbar">
           <input className="search-input" placeholder="Hledat název, barkód nebo PLU" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <label className="compact-select-label">Kategorie
+            <select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
+              <option value="Vše">Všechny kategorie</option>
+              {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </label>
           <span className="muted">{filtered.length} položek</span>
+        </div>
+
+        <div className="product-order-panel">
+          <div className="section-title-row">
+            <div>
+              <strong>Pořadí dlaždic v pokladně</strong>
+              <p className="muted no-margin">Vyber kategorii a posuň produkty. Pořadí se uloží i do Supabase a projeví se v pokladně.</p>
+            </div>
+            <label className="compact-select-label">Řadit kategorii
+              <select value={activeOrderCategory} onChange={(event) => setOrderCategory(event.target.value)}>
+                {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="product-order-grid">
+            {orderedCategoryProducts.map((product, index) => {
+              const visual = getProductMeta(product, index);
+              return (
+                <div key={product.id} className="product-order-tile" style={visual.style}>
+                  <div>
+                    <span className="order-number">#{index + 1}</span>
+                    <strong>{product.name}</strong>
+                    <small>{formatCurrency(product.priceWithVat ?? product.price)}</small>
+                  </div>
+                  <div className="order-buttons">
+                    <button type="button" className="ghost-button small-btn" disabled={index === 0} onClick={() => moveProductInCategory(product.id, 'first')}>Na začátek</button>
+                    <button type="button" className="ghost-button small-btn" disabled={index === 0} onClick={() => moveProductInCategory(product.id, -1)}>↑</button>
+                    <button type="button" className="ghost-button small-btn" disabled={index === orderedCategoryProducts.length - 1} onClick={() => moveProductInCategory(product.id, 1)}>↓</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="table-wrap">
           <table>
@@ -140,6 +214,7 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
                 <th>Sklad</th>
                 <th>Days to zero</th>
                 <th>Stav</th>
+                <th>Pořadí</th>
                 <th></th>
               </tr>
             </thead>
@@ -164,6 +239,7 @@ export function ProductsPage({ products, categories, analyticsMap, onAddProduct,
                     <td>
                       {product.hidden ? <span className="badge">Skrytý</span> : <span className={`badge ${analytics?.statusTone || 'accent-badge'}`}>{analytics?.statusLabel || 'Aktivní'}</span>}
                     </td>
+                    <td>{Number.isFinite(Number(product.displayOrder)) ? `#${Number(product.displayOrder)}` : 'auto'}</td>
                     <td><button className="ghost-button" onClick={() => openEdit(product)}>Upravit</button></td>
                   </tr>
                 );
