@@ -124,6 +124,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
   const [weightQuantity, setWeightQuantity] = useState('');
   const [editingItemId, setEditingItemId] = useState('');
   const [productInfoProduct, setProductInfoProduct] = useState(null);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const longPressTimerRef = useRef(null);
   const longPressProductIdRef = useRef('');
   const pointerStartRef = useRef({ x: 0, y: 0 });
@@ -183,6 +184,12 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
       discountMode: patch.discountMode ?? currentTicket.discountMode ?? 'amount',
       discountValue: patch.discountValue ?? currentTicket.discountValue ?? 0,
     });
+  };
+
+
+  const chooseCategory = (category) => {
+    setSelectedCategory(category);
+    setCategoryPickerOpen(false);
   };
 
   const orderedCategories = useMemo(() => sortCategories(categories), [categories]);
@@ -529,20 +536,25 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <div className="category-tabs">
-              {orderedCategories.map((category, index) => {
-                const categoryMeta = getCategoryMeta(category, index);
-                return (
-                  <button
-                    key={category}
-                    className={`tab-pill category-pill ${selectedCategory === category ? 'active' : ''}`}
-                    style={categoryMeta.style}
-                    onClick={() => setSelectedCategory(category)}
-                  >
-                    {category}
-                  </button>
-                );
-              })}
+            <div className="category-strip-wrap">
+              <div className="category-tabs category-tabs-one-line">
+                {orderedCategories.map((category, index) => {
+                  const categoryMeta = getCategoryMeta(category, index);
+                  return (
+                    <button
+                      key={category}
+                      className={`tab-pill category-pill ${selectedCategory === category ? 'active' : ''}`}
+                      style={categoryMeta.style}
+                      onClick={() => setSelectedCategory(category)}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="all-categories-button" type="button" onClick={() => setCategoryPickerOpen(true)}>
+                Všechny kategorie
+              </button>
             </div>
           </div>
           <div className="product-grid dense-product-grid">
@@ -665,8 +677,40 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
         </aside>
       </div>
 
+      {categoryPickerOpen ? (
+        <div className="modal-backdrop modal-backdrop-scroll" onPointerDown={(event) => { if (event.target === event.currentTarget) setCategoryPickerOpen(false); }}>
+          <div className="modal touch-modal category-picker-modal">
+            <div className="modal-header">
+              <div>
+                <h3>Vybrat kategorii</h3>
+                <p className="muted">Klepnutím na dlaždici se popup zavře a zobrazí se vybraná kategorie.</p>
+              </div>
+              <button className="ghost-button" onClick={() => setCategoryPickerOpen(false)}>✕</button>
+            </div>
+            <div className="category-picker-grid">
+              {orderedCategories.map((category, index) => {
+                const categoryMeta = getCategoryMeta(category, index);
+                const count = category === 'Vše' ? orderedProducts.length : orderedProducts.filter((product) => product.category === category).length;
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    className={`category-picker-tile ${selectedCategory === category ? 'active' : ''}`}
+                    style={categoryMeta.style}
+                    onClick={() => chooseCategory(category)}
+                  >
+                    <strong>{category}</strong>
+                    <small>{count} produktů</small>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {productInfoProduct ? (
-        <div className="modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setProductInfoProduct(null); }}>
+        <div className="modal-backdrop modal-backdrop-scroll" onPointerDown={(event) => { if (event.target === event.currentTarget) setProductInfoProduct(null); }}>
           <div className="modal touch-modal product-info-sheet">
             <div className="modal-header">
               <div>
@@ -719,7 +763,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
       ) : null}
 
       {weightProduct ? (
-        <div className="modal-backdrop">
+        <div className="modal-backdrop modal-backdrop-scroll">
           <div className="modal touch-modal quantity-modal">
             <div className="modal-header">
               <div>
@@ -760,7 +804,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
       ) : null}
 
       {editingItem ? (
-        <div className="modal-backdrop">
+        <div className="modal-backdrop modal-backdrop-scroll">
           <div className="modal touch-modal item-edit-modal">
             <div className="modal-header">
               <div>

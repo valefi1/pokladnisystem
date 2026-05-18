@@ -216,3 +216,8 @@ begin
     execute format('create policy "%1$s owner delete" on public.%1$I for delete using (auth.uid() = owner_id)', t);
   end loop;
 end $$;
+
+
+-- v1.16: IMPORTANT - one-time correction for older products whose stored price was originally WITHOUT VAT.
+-- Do NOT put that correction here because schema.sql can be run repeatedly.
+-- Use supabase/fix_existing_product_prices_net_to_gross.sql exactly once if your current visible prices are net prices displayed as gross.

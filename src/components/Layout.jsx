@@ -23,20 +23,22 @@ export function Layout({ children, syncStatus }) {
 
   return (
     <div className={`app-frame ${isCashier ? 'cashier-shell-mode' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      <header className="topbar">
-        <div className="topbar-brand">
-          <div className="brand-badge">PS</div>
-          <div>
-            <strong>Pokladní systém</strong>
-            <p>Šumperská Špajzka · webové MVP</p>
+      {!isCashier ? (
+        <header className="topbar">
+          <div className="topbar-brand">
+            <div className="brand-badge">PS</div>
+            <div>
+              <strong>Pokladní systém</strong>
+              <p>Šumperská Špajzka · webové MVP</p>
+            </div>
           </div>
-        </div>
-        <div className="topbar-status">
-          <span className={`badge ${syncStatus?.state === 'online' ? 'accent-badge' : syncStatus?.state === 'error' ? 'danger-badge' : ''}`} title={syncStatus?.message || ''}>{syncStatus?.mode || 'Lokální režim'}</span>
-          <span className="badge accent-badge">Dotypay ready</span>
-          <span className="badge">USB tisk připraven</span>
-        </div>
-      </header>
+          <div className="topbar-status">
+            <span className={`badge ${syncStatus?.state === 'online' ? 'accent-badge' : syncStatus?.state === 'error' ? 'danger-badge' : ''}`} title={syncStatus?.message || ''}>{syncStatus?.mode || 'Lokální režim'}</span>
+            <span className="badge accent-badge">Dotypay ready</span>
+            <span className="badge">USB tisk připraven</span>
+          </div>
+        </header>
+      ) : null}
       <div className="app-shell">
         <aside className="sidebar">
           <button
