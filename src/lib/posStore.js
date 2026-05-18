@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { loadState, resetState, saveState } from './storage';
-import { loadRemoteState, syncStateToSupabase, syncProductPresentationToSupabase, getSyncModeLabel } from './supabaseSync';
+import { loadRemoteState, syncStateToSupabase, syncProductPresentationToSupabase, syncProductsToSupabase, getSyncModeLabel } from './supabaseSync';
 import { supabaseConfigured } from './supabaseClient';
 import { buildVatBreakdown, netFromGross, normalizeProductVatPricing, roundMoney, vatFromGross } from './vat';
 
@@ -773,6 +773,8 @@ export function usePosStore() {
   const [remoteLoadOk, setRemoteLoadOk] = useState(!supabaseConfigured);
   const remoteLoadedRef = useRef(false);
   const remoteLoadSucceededRef = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const pendingLocalWriteRef = useRef(false);
   const lastLocalChangeAtRef = useRef(0);
   const fullDirtyRef = useRef(false);
@@ -800,24 +802,37 @@ export function usePosStore() {
 
   const dispatchFullAndSyncImmediately = async (action) => {
     markLocalChange('full');
-    const nextState = reducer(state, action);
+    const baseState = stateRef.current;
+    const nextState = reducer(baseState, action);
     dispatch(action);
     saveState(nextState);
 
     if (!remoteLoadedRef.current || !remoteLoadSucceededRef.current) {
-      return { skipped: true };
+      const error = new Error('Import se změnil jen lokálně, protože Supabase ještě není připravená. Počkej na stav „Načteno ze Supabase“ a spusť import znovu.');
+      setSyncStatus({ mode: getSyncModeLabel(), state: 'error', message: error.message });
+      throw error;
     }
 
     try {
-      setSyncStatus({ mode: getSyncModeLabel(), state: 'syncing', message: 'Zapisuji import do Supabase…' });
-      const result = await syncStateToSupabase(nextState);
-      if (!result?.skipped) {
-        fullDirtyRef.current = false;
-        presentationDirtyProductIdsRef.current.clear();
-        pendingLocalWriteRef.current = false;
-        lastLocalChangeAtRef.current = Date.now();
-        setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Import zapsán do Supabase.' });
+      setSyncStatus({ mode: getSyncModeLabel(), state: 'syncing', message: 'Zapisuji importované produkty přímo do Supabase…' });
+
+      if (action.type === 'IMPORT_STOCK_SNAPSHOT' || action.type === 'IMPORT_DOTYKACKA_CSV') {
+        const resultProducts = await syncProductsToSupabase(nextState.products || []);
+        if (resultProducts?.skipped) {
+          throw new Error('Supabase není nastavená, import se nezapsal do databáze.');
+        }
       }
+
+      const result = await syncStateToSupabase(nextState);
+      if (result?.skipped) {
+        throw new Error('Supabase sync byl přeskočen, import se nezapsal do databáze.');
+      }
+
+      fullDirtyRef.current = false;
+      presentationDirtyProductIdsRef.current.clear();
+      pendingLocalWriteRef.current = false;
+      lastLocalChangeAtRef.current = Date.now();
+      setSyncStatus({ mode: getSyncModeLabel(), state: 'online', message: 'Import je zapsaný v Supabase.' });
       return result;
     } catch (error) {
       fullDirtyRef.current = true;

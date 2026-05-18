@@ -462,6 +462,23 @@ export async function syncProductPresentationToSupabase(state, productIds = []) 
   return { ok: true, updated: rows.length };
 }
 
+
+export async function syncProductsToSupabase(products = []) {
+  if (!supabaseConfigured || !supabase) return { skipped: true };
+  const userId = await getUserIdOrThrow();
+  const rows = (products || [])
+    .filter((item) => item?.id)
+    .map((item) => productRow(userId, item));
+  if (!rows.length) return { ok: true, updated: 0 };
+
+  const { error } = await supabase
+    .from(SYNC_TABLES.products)
+    .upsert(rows, { onConflict: 'owner_id,id' });
+
+  if (error) throw error;
+  return { ok: true, updated: rows.length };
+}
+
 export async function syncStateToSupabase(state) {
   if (!supabaseConfigured || !supabase) return { skipped: true };
   const userId = await getUserIdOrThrow();
