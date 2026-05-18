@@ -330,6 +330,24 @@ async function getUserIdOrThrow() {
   return user.id;
 }
 
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function getImportMatchKey(productLike = {}) {
+  if (productLike.barcode) return `barcode:${String(productLike.barcode).trim()}`;
+  if (productLike.plu) return `plu:${String(productLike.plu).trim()}`;
+  return `name:${normalizeText(productLike.name)}|cat:${normalizeText(productLike.category)}`;
+}
+
+function numbersClose(a, b, tolerance = 0.01) {
+  return Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+}
+
 function isMissingRelation(error) {
   return error?.code === '42P01' || /does not exist|relation .* does not exist/i.test(error?.message || '');
 }
@@ -462,6 +480,76 @@ export async function syncProductPresentationToSupabase(state, productIds = []) 
   return { ok: true, updated: rows.length };
 }
 
+
+
+export async function upsertImportedProductsToSupabase(importedProducts = [], localProducts = []) {
+  if (!supabaseConfigured || !supabase) return { skipped: true };
+  const userId = await getUserIdOrThrow();
+  const incoming = (importedProducts || []).filter((item) => item?.name || item?.barcode || item?.plu);
+  if (!incoming.length) return { ok: true, updated: 0 };
+
+  const { data: remoteRows, error: readError } = await supabase
+    .from(SYNC_TABLES.products)
+    .select('*')
+    .eq('owner_id', userId);
+  if (readError) throw readError;
+
+  const remoteProducts = (remoteRows || []).map(productFromRow);
+  const existingByKey = new Map();
+  for (const product of [...remoteProducts, ...(localProducts || [])]) {
+    if (!product) continue;
+    existingByKey.set(getImportMatchKey(product), product);
+  }
+
+  const rows = incoming.map((raw) => {
+    const normalizedIncoming = normalizeProductVatPricing(raw);
+    const key = getImportMatchKey(normalizedIncoming);
+    const existing = existingByKey.get(key) || null;
+    const merged = normalizeProductVatPricing({
+      ...(existing || {}),
+      ...normalizedIncoming,
+      id: existing?.id || normalizedIncoming.id || `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      hidden: existing?.hidden ?? normalizedIncoming.hidden ?? false,
+      displayOrder: existing?.displayOrder ?? normalizedIncoming.displayOrder,
+      tileColor: existing?.tileColor ?? normalizedIncoming.tileColor,
+      colorKey: existing?.colorKey ?? normalizedIncoming.colorKey,
+      importedAt: new Date().toISOString(),
+    });
+    return productRow(userId, merged);
+  });
+
+  const { error: upsertError } = await supabase
+    .from(SYNC_TABLES.products)
+    .upsert(rows, { onConflict: 'owner_id,id' });
+  if (upsertError) throw upsertError;
+
+  const ids = rows.map((row) => row.id);
+  const { data: writtenRows, error: verifyError } = await supabase
+    .from(SYNC_TABLES.products)
+    .select('*')
+    .eq('owner_id', userId)
+    .in('id', ids);
+  if (verifyError) throw verifyError;
+
+  const writtenById = new Map((writtenRows || []).map((row) => [String(row.id), row]));
+  const mismatches = [];
+  for (const row of rows) {
+    const written = writtenById.get(String(row.id));
+    if (!written) {
+      mismatches.push(`${row.name || row.id}: řádek se po zápisu nenačetl ze Supabase`);
+      continue;
+    }
+    if (!numbersClose(written.price, row.price) || !numbersClose(written.price_with_vat, row.price_with_vat) || !numbersClose(written.price_without_vat, row.price_without_vat) || !numbersClose(written.vat_rate, row.vat_rate) || !numbersClose(written.stock, row.stock)) {
+      mismatches.push(`${row.name || row.id}: očekáváno cena ${row.price}, DPH ${row.vat_rate}, sklad ${row.stock}; v DB je cena ${written.price}, DPH ${written.vat_rate}, sklad ${written.stock}`);
+    }
+  }
+
+  if (mismatches.length) {
+    throw new Error(`Import se nepodařilo ověřit v Supabase. ${mismatches.slice(0, 3).join(' | ')}`);
+  }
+
+  return { ok: true, updated: rows.length };
+}
 
 export async function syncProductsToSupabase(products = []) {
   if (!supabaseConfigured || !supabase) return { skipped: true };
