@@ -290,10 +290,10 @@ function lineDiscount(item) {
 
 function parkedTicketTotal(ticket) {
   const items = Array.isArray(ticket.items) ? ticket.items : [];
-  const subtotal = items.reduce((sum, item) => sum + Math.max(0, lineGross(item) - lineDiscount(item)), 0);
+  const subtotal = items.reduce((sum, item) => sum + (lineGross(item) - lineDiscount(item)), 0);
   const raw = Number(ticket.discountValue) || 0;
-  const orderDiscount = ticket.discountMode === 'percent' ? Math.min(subtotal, subtotal * raw / 100) : Math.min(subtotal, raw);
-  return Math.max(0, subtotal - Math.max(0, orderDiscount));
+  const orderDiscount = subtotal > 0 ? (ticket.discountMode === 'percent' ? Math.min(subtotal, subtotal * raw / 100) : Math.min(subtotal, raw)) : 0;
+  return subtotal - Math.max(0, orderDiscount);
 }
 
 function parkedTicketRow(userId, ticket) {

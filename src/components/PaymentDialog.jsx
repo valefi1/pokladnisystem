@@ -88,6 +88,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
   }, [tip, tipMode, total]);
 
   const totalWithTip = total + tipAmount;
+  const isNegativeDocument = totalWithTip < 0;
   const cashPayableTotal = roundCashAmount(totalWithTip);
   const payableTotal = method === 'cash' && !split.active ? cashPayableTotal : totalWithTip;
   const roundingAmount = method === 'cash' && !split.active ? cashPayableTotal - totalWithTip : 0;
@@ -95,15 +96,16 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
   const change = useMemo(() => {
     const r = Number(cashReceived) || 0;
     const due = method === 'cash' && !split.active ? cashPayableTotal : (split.active ? split.remaining : totalWithTip);
+    if (due <= 0) return 0;
     return Math.max(0, r - due);
   }, [cashReceived, totalWithTip, split, method, cashPayableTotal]);
 
-  const dotypayReady = method === 'card' && (prefs.terminalMode === 'dotypay-sim' || prefs.terminalMode === 'dotypay-live');
+  const dotypayReady = method === 'card' && payableTotal > 0 && (prefs.terminalMode === 'dotypay-sim' || prefs.terminalMode === 'dotypay-live');
 
   const disableConfirm =
     submitting ||
-    (method === 'cash' && !split.active && (Number(cashReceived) || 0) < payableTotal) ||
-    (method === 'cash' && split.active && (Number(cashReceived) || 0) < split.remaining) ||
+    (method === 'cash' && !split.active && payableTotal > 0 && (Number(cashReceived) || 0) < payableTotal) ||
+    (method === 'cash' && split.active && split.remaining > 0 && (Number(cashReceived) || 0) < split.remaining) ||
     (method === 'invoice' && !invoiceCustomer.trim()) ||
     (method === 'voucher' && !voucherLabel.trim());
 
@@ -244,7 +246,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           </div>
 
           {/* ── Spropitné ── */}
-          {method !== 'unpaid' && method !== 'invoice' && (
+          {method !== 'unpaid' && method !== 'invoice' && !isNegativeDocument && (
             <div className="inner-card stack compact">
               <div className="section-title-row">
                 <strong>Spropitné</strong>
@@ -280,31 +282,39 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
             <div className="inner-card stack compact">
               <div className="section-title-row">
                 <strong>Přijatá částka</strong>
-                <span className="badge accent-badge">Hotově zaokrouhleno na celé Kč</span>
+                <span className="badge accent-badge">{payableTotal < 0 ? 'Vratka hotově' : 'Hotově zaokrouhleno na celé Kč'}</span>
               </div>
               <div className="cash-rounding-summary">
                 <div className="list-row"><span>Před zaokrouhlením</span><strong>{formatCurrency(totalWithTip)}</strong></div>
                 <div className="list-row"><span>Zaokrouhlení</span><strong className={roundingAmount === 0 ? '' : roundingAmount > 0 ? 'warning-text' : 'success-text'}>{formatCurrency(roundingAmount)}</strong></div>
-                <div className="list-row"><span>K úhradě hotově</span><strong>{formatCurrency(payableTotal)}</strong></div>
+                <div className="list-row"><span>{payableTotal < 0 ? 'Vrátit zákazníkovi' : 'K úhradě hotově'}</span><strong>{formatCurrency(Math.abs(payableTotal))}</strong></div>
               </div>
-              <div className="banknote-suggestions">
-                {getSuggestions(currentRemaining).map((val) => (
-                  <button key={val} type="button" className={`banknote-btn ${Number(cashReceived) === val ? 'active' : ''}`}
-                    onClick={() => setCashReceived(String(val))}>
-                    {formatCurrency(val)}
-                  </button>
-                ))}
-              </div>
-              <div className="form-grid">
-                <label>
-                  Zadáno zákazníkem
-                  <input type="number" min={currentRemaining} step="1" value={cashReceived}
-                    onChange={(e) => setCashReceived(e.target.value)} autoFocus />
-                </label>
-                <div className="summary-box summary-box-inline" style={{ alignSelf: 'flex-end' }}>
-                  Vrátit: <strong className={change > 0 ? 'success-text' : ''}>{formatCurrency(change)}</strong>
+              {payableTotal > 0 ? (
+                <>
+                  <div className="banknote-suggestions">
+                    {getSuggestions(currentRemaining).map((val) => (
+                      <button key={val} type="button" className={`banknote-btn ${Number(cashReceived) === val ? 'active' : ''}`}
+                        onClick={() => setCashReceived(String(val))}>
+                        {formatCurrency(val)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="form-grid">
+                    <label>
+                      Zadáno zákazníkem
+                      <input type="number" min={currentRemaining} step="1" value={cashReceived}
+                        onChange={(e) => setCashReceived(e.target.value)} autoFocus />
+                    </label>
+                    <div className="summary-box summary-box-inline" style={{ alignSelf: 'flex-end' }}>
+                      Vrátit: <strong className={change > 0 ? 'success-text' : ''}>{formatCurrency(change)}</strong>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="summary-box summary-box-inline">
+                  Vratka zákazníkovi: <strong className="warning-text">{formatCurrency(Math.abs(payableTotal))}</strong>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -372,7 +382,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           )}
 
           {/* ── Rozdělit platbu ── */}
-          {method !== 'unpaid' && (
+          {method !== 'unpaid' && totalWithTip > 0 && (
             <div className="inner-card stack compact">
               <div className="section-title-row">
                 <strong>Rozdělit platbu</strong>
@@ -431,7 +441,7 @@ export function PaymentDialog({ open, onClose, total, documentNumberPreview, onC
           <div className="form-actions">
             <button className="ghost-button" onClick={onClose} disabled={submitting}>Zpět</button>
             <button className="primary-button" onClick={handleConfirm} disabled={disableConfirm}>
-              {submitting ? 'Zpracovávám…' : method === 'unpaid' ? 'Označit nezaplaceno' : dotypayReady ? `Odeslat na terminál · ${formatCurrency(payableTotal)}` : `Potvrdit · ${formatCurrency(payableTotal)}`}
+              {submitting ? 'Zpracovávám…' : method === 'unpaid' ? 'Označit nezaplaceno' : payableTotal < 0 ? `Potvrdit vratku · ${formatCurrency(Math.abs(payableTotal))}` : dotypayReady ? `Odeslat na terminál · ${formatCurrency(payableTotal)}` : `Potvrdit · ${formatCurrency(payableTotal)}`}
             </button>
           </div>
         </div>

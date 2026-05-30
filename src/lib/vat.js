@@ -55,7 +55,7 @@ export function buildVatBreakdown(items = [], orderDiscountAmount = 0) {
     const vatRate = getVatRate(item.vatRate, 12);
     const lineTotal = Number(item.lineTotal) || 0;
     const discountShare = totalAfterItemDiscounts > 0 ? (lineTotal / totalAfterItemDiscounts) * (Number(orderDiscountAmount) || 0) : 0;
-    const taxableGross = Math.max(0, lineTotal - discountShare);
+    const taxableGross = lineTotal - discountShare;
     const base = netFromGross(taxableGross, vatRate);
     const vat = roundMoney(taxableGross - base);
     const key = String(vatRate);

@@ -29,7 +29,7 @@ function renderLineItems(items = []) {
       const qty = `${formatQuantity(item.quantity)} ${formatUnitLabel(item.unit || 'ks')}`;
       const gross = (Number(item.lineGross) || ((Number(item.price) || 0) * (Number(item.quantity) || 0)));
       const discount = Number(item.lineDiscount) || 0;
-      const lineTotal = Number(item.lineTotal) || Math.max(0, gross - discount);
+      const lineTotal = Number.isFinite(Number(item.lineTotal)) ? Number(item.lineTotal) : (gross - discount);
       return `
         <tr>
           <td>
@@ -46,7 +46,8 @@ function renderLineItems(items = []) {
 
 function buildDocumentHtml(sale, prefs) {
   const isInvoice = sale.paymentMethod === 'invoice';
-  const title = isInvoice ? 'FAKTURA / DODACÍ DOKLAD' : 'ÚČTENKA';
+  const documentTotalForTitle = Number(sale.total) || 0;
+  const title = documentTotalForTitle < 0 ? 'VRATKA / ZÁPORNÝ DOKLAD' : isInvoice ? 'FAKTURA / DODACÍ DOKLAD' : 'ÚČTENKA';
   const paymentLabel = PAYMENT_LABELS[sale.paymentMethod] || sale.paymentMethod;
   const invoiceDue = sale.invoiceDueDate ? formatDateTime(sale.invoiceDueDate) : '—';
   const customerName = sale.invoiceCustomer || sale.voucherLabel || '';
@@ -59,7 +60,7 @@ function buildDocumentHtml(sale, prefs) {
   const grossSubtotal = Number(sale.grossSubtotal ?? sale.subtotal ?? sale.total ?? 0);
   const itemDiscountTotal = Number(sale.itemDiscountTotal) || 0;
   const saleDiscountAmount = Number(sale.saleDiscountAmount) || 0;
-  const subtotal = Number(sale.subtotal ?? Math.max(0, grossSubtotal - itemDiscountTotal - saleDiscountAmount));
+  const subtotal = Number(sale.subtotal ?? (grossSubtotal - itemDiscountTotal - saleDiscountAmount));
   const vatBreakdown = Array.isArray(sale.vatBreakdown) && sale.vatBreakdown.length ? sale.vatBreakdown : buildVatBreakdown(sale.items || [], saleDiscountAmount);
   const subtotalWithoutVat = Number(sale.subtotalWithoutVat ?? vatBreakdown.reduce((sum, row) => sum + (Number(row.base) || 0), 0));
   const vatTotal = Number(sale.vatTotal ?? vatBreakdown.reduce((sum, row) => sum + (Number(row.vat) || 0), 0));
@@ -134,12 +135,13 @@ function buildDocumentHtml(sale, prefs) {
           ${tipAmount > 0 ? `<tr><td>Spropitné</td><td class="text-right">${escapeHtml(formatCurrency(tipAmount))}</td></tr>` : ''}
           ${roundingAmount !== 0 ? `<tr><td>Zaokrouhlení hotově</td><td class="text-right">${escapeHtml(formatCurrency(roundingAmount))}</td></tr>` : ''}
           <tr>
-            <td>Celkem k úhradě</td>
+            <td>${total < 0 ? 'Celkem vyplatit / vrátit' : 'Celkem k úhradě'}</td>
             <td class="text-right totals">${escapeHtml(formatCurrency(total))}</td>
           </tr>
           ${splitRows}
-          ${sale.paymentMethod === 'cash' ? `<tr><td>Přijato</td><td class="text-right">${escapeHtml(formatCurrency(sale.cashReceived || 0))}</td></tr>` : ''}
-          ${sale.paymentMethod === 'cash' ? `<tr><td>Vráceno</td><td class="text-right">${escapeHtml(formatCurrency(sale.change || 0))}</td></tr>` : ''}
+          ${sale.paymentMethod === 'cash' && total >= 0 ? `<tr><td>Přijato</td><td class="text-right">${escapeHtml(formatCurrency(sale.cashReceived || 0))}</td></tr>` : ''}
+          ${sale.paymentMethod === 'cash' && total >= 0 ? `<tr><td>Vráceno</td><td class="text-right">${escapeHtml(formatCurrency(sale.change || 0))}</td></tr>` : ''}
+          ${sale.paymentMethod === 'cash' && total < 0 ? `<tr><td>Vyplaceno zákazníkovi</td><td class="text-right">${escapeHtml(formatCurrency(Math.abs(total)))}</td></tr>` : ''}
         </tbody>
       </table>
       <p class="print-note">Režim tisku: ${escapeHtml(printerModeLabel(prefs.printerMode))} · ${escapeHtml(prefs.printerPaper)}</p>

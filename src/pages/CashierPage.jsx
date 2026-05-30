@@ -60,7 +60,7 @@ function getLineDiscountAmount(item) {
 }
 
 function getLineTotal(item) {
-  return Math.max(0, getLineGross(item) - getLineDiscountAmount(item));
+  return getLineGross(item) - getLineDiscountAmount(item);
 }
 
 function getItemsSubtotal(items) {
@@ -72,7 +72,7 @@ function getItemDiscountTotal(items) {
 }
 
 function getTicketBaseAfterItemDiscounts(items) {
-  return Math.max(0, getItemsSubtotal(items) - getItemDiscountTotal(items));
+  return getItemsSubtotal(items) - getItemDiscountTotal(items);
 }
 
 function getOrderDiscountAmount(ticket, items) {
@@ -85,7 +85,7 @@ function getOrderDiscountAmount(ticket, items) {
 
 function getTicketTotal(ticket) {
   const items = ticket?.items || [];
-  return Math.max(0, getTicketBaseAfterItemDiscounts(items) - getOrderDiscountAmount(ticket, items));
+  return getTicketBaseAfterItemDiscounts(items) - getOrderDiscountAmount(ticket, items);
 }
 
 function prepareSaleItems(items) {
@@ -102,10 +102,10 @@ function prepareSaleItems(items) {
       discountValue: Number(item.discountValue) || 0,
       lineGross,
       lineDiscount,
-      lineTotal: Math.max(0, lineGross - lineDiscount),
-      lineTotalWithVat: Math.max(0, lineGross - lineDiscount),
-      lineTotalWithoutVat: netFromGross(Math.max(0, lineGross - lineDiscount), item.vatRate),
-      lineVatAmount: vatFromGross(Math.max(0, lineGross - lineDiscount), item.vatRate),
+      lineTotal: lineGross - lineDiscount,
+      lineTotalWithVat: lineGross - lineDiscount,
+      lineTotalWithoutVat: netFromGross(lineGross - lineDiscount, item.vatRate),
+      lineVatAmount: vatFromGross(lineGross - lineDiscount, item.vatRate),
     };
   });
 }
@@ -822,7 +822,7 @@ export function CashierPage({ products, categories, nextDocumentSequence, active
                   <input type="number" min={isWeightUnit(editingItem.unit) ? '0.001' : '1'} step={getQuantityStep(editingItem.unit)} value={editingItem.quantity} onChange={(event) => updateCartItem(editingItem.productId, { quantity: normalizeCartQuantity(event.target.value, editingItem.unit) })} />
                 </label>
                 <label>Cena za jednotku s DPH
-                  <input type="number" min="0" step="0.01" value={editingItem.priceWithVat ?? editingItem.price} onChange={(event) => { const value = parseNumber(event.target.value); updateCartItem(editingItem.productId, { price: value, priceWithVat: value, priceWithoutVat: netFromGross(value, editingItem.vatRate) }); }} />
+                  <input type="number" step="0.01" value={editingItem.priceWithVat ?? editingItem.price} onChange={(event) => { const value = parseNumber(event.target.value); updateCartItem(editingItem.productId, { price: value, priceWithVat: value, priceWithoutVat: netFromGross(value, editingItem.vatRate) }); }} />
                 </label>
               </div>
               <div className="inner-card stack compact">

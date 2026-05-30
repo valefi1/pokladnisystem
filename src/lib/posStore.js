@@ -351,7 +351,7 @@ function reducer(state, action) {
         const priceWithoutVat = Number.isFinite(Number(item.priceWithoutVat)) ? Number(item.priceWithoutVat) : netFromGross(priceWithVat, vatRate);
         const lineGross = Number(item.lineGross) || priceWithVat * quantity;
         const lineDiscount = Number(item.lineDiscount) || 0;
-        const lineTotal = Math.max(0, Number(item.lineTotal) || (lineGross - lineDiscount));
+        const lineTotal = Number.isFinite(Number(item.lineTotal)) ? Number(item.lineTotal) : (lineGross - lineDiscount);
         const lineTotalWithoutVat = netFromGross(lineTotal, vatRate);
         const lineVatAmount = vatFromGross(lineTotal, vatRate);
         return {
@@ -380,13 +380,13 @@ function reducer(state, action) {
       const gross = Number(grossSubtotal) || computedGrossSubtotal;
       const itemDiscount = Number(itemDiscountTotal) || computedItemDiscount;
       const saleDiscount = Number(saleDiscountAmount) || 0;
-      const subtotal = Math.max(0, gross - itemDiscount - saleDiscount);
+      const subtotal = gross - itemDiscount - saleDiscount;
       const vatBreakdown = buildVatBreakdown(preparedItems, saleDiscount);
       const subtotalWithoutVat = roundMoney(vatBreakdown.reduce((sum, row) => sum + row.base, 0));
       const vatTotal = roundMoney(vatBreakdown.reduce((sum, row) => sum + row.vat, 0));
       const tip = Number(tipAmount) || 0;
       const rounding = Number(roundingAmount) || 0;
-      const total = Number.isFinite(Number(payableTotal)) ? Number(payableTotal) : Math.max(0, subtotal + tip + rounding);
+      const total = Number.isFinite(Number(payableTotal)) ? Number(payableTotal) : (subtotal + tip + rounding);
       const received = Number(cashReceived) || 0;
       const change = paymentMethod === 'cash' ? Math.max(0, received - total) : 0;
       const movementEntries = [];
@@ -395,16 +395,18 @@ function reducer(state, action) {
         const saleItem = preparedItems.find((item) => item.productId === product.id);
         if (!saleItem) return product;
         const beforeStock = Number(product.stock) || 0;
-        const afterStock = beforeStock - saleItem.quantity;
+        const isReturnLine = (Number(saleItem.priceWithVat ?? saleItem.price) || 0) < 0 || (Number(saleItem.lineTotal) || 0) < 0;
+        const stockDelta = isReturnLine ? saleItem.quantity : -saleItem.quantity;
+        const afterStock = beforeStock + stockDelta;
         movementEntries.push({
           id: uid('m'),
           productId: product.id,
           productName: product.name,
-          type: 'sale',
+          type: isReturnLine ? 'return' : 'sale',
           quantity: saleItem.quantity,
           beforeStock,
           afterStock,
-          note: `Prodej přes pokladnu · ${documentNumber}`,
+          note: `${isReturnLine ? 'Vratka / výkup přes pokladnu' : 'Prodej přes pokladnu'} · ${documentNumber}`,
           createdAt,
         });
         historyEntries.push({
@@ -413,7 +415,7 @@ function reducer(state, action) {
           analyticsKey: getProductKey(product),
           productName: product.name,
           category: product.category,
-          type: 'sale',
+          type: isReturnLine ? 'return' : 'sale',
           quantity: saleItem.quantity,
           createdAt,
           source: 'cashier',

@@ -64,7 +64,7 @@ export function Layout({ children, syncStatus }) {
             ))}
           </nav>
           <div className="sidebar-note">
-            Světlý kontrastní styl pro obsluhu, přehledy inspirované Dotykačkou a příprava na terminál i tiskárnu.
+            Moderní modrý režim pro rychlý prodej, přehledy, zařízení a každodenní provoz pokladny.
           </div>
         </aside>
         <main className="content">{children}</main>

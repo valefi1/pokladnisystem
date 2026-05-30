@@ -69,11 +69,11 @@ export function ProductFormModal({ open, onClose, onSave, product, existingCateg
           </label>
           <label>
             Prodejní cena s DPH
-            <input type="number" min="0" step="0.01" value={form.priceWithVat ?? form.price ?? 0} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithVat', value); handleChange('price', value); handleChange('priceWithoutVat', netFromGross(value, form.vatRate)); }} />
+            <input type="number" step="0.01" value={form.priceWithVat ?? form.price ?? 0} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithVat', value); handleChange('price', value); handleChange('priceWithoutVat', netFromGross(value, form.vatRate)); }} />
           </label>
           <label>
             Prodejní cena bez DPH
-            <input type="number" min="0" step="0.01" value={form.priceWithoutVat ?? netFromGross(form.priceWithVat ?? form.price, form.vatRate)} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithoutVat', value); const gross = grossFromNet(value, form.vatRate); handleChange('priceWithVat', gross); handleChange('price', gross); }} />
+            <input type="number" step="0.01" value={form.priceWithoutVat ?? netFromGross(form.priceWithVat ?? form.price, form.vatRate)} onChange={(e) => { const value = Number(e.target.value) || 0; handleChange('priceWithoutVat', value); const gross = grossFromNet(value, form.vatRate); handleChange('priceWithVat', gross); handleChange('price', gross); }} />
           </label>
           <label>
             Nákupní cena bez DPH
